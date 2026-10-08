@@ -11,6 +11,6 @@
     "status": "node --env-file-if-exists=.env src/main.js status",
     "resume": "node --env-file-if-exists=.env src/main.js resume",
     "test": "node --test",
-    "lint": "node --check src/main.js && node --check src/bot.js && node --check src/api.js && node --check src/store.js"
+    "lint": "node --check src/main.js && node --check src/bot.js && node --check src/api.js && node --check src/store.js && node --check src/schedule.js && node --check src/dashboard.js && node --check public/app.js"
   }
 }

@@ -4,9 +4,18 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { Api } from './api.js';
 import { Bot, STRATEGY } from './bot.js';
 import { Store } from './store.js';
+import { Monitor, createDashboard, snapshot } from './dashboard.js';
 
-const log = (event, detail = {}) => console.log(JSON.stringify({ at: new Date().toISOString(), event, ...detail }));
+const events = [];
+const log = (event, detail = {}) => {
+  const entry = { at: new Date().toISOString(), event, ...detail };
+  events.push(entry);
+  if (events.length > 100) events.shift();
+  console.log(JSON.stringify(entry));
+};
 let unlock;
+let server;
+let monitor;
 let stopping = false;
 try {
   const mode = process.env.BOT_MODE || 'dry-run';
@@ -33,17 +42,22 @@ try {
     if (command === 'check') {
       const result = await bot.check();
       log('connection_check', result);
-      if (!result.harnessMatches || !result.symbolsAvailable || result.balance < 300) process.exitCode = 1;
+      if (!result.harnessMatches || !result.symbolsAvailable || result.balance < 75) process.exitCode = 1;
     } else {
       unlock = store.lock();
       // Cargar de nuevo bajo el lock para excluir cambios de otra instancia.
       bot.state = store.load();
       store.save(bot.state);
       for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { stopping = true; });
+      monitor = new Monitor(bot.api, harness);
+      server = await createDashboard({ getSnapshot: () => snapshot(bot, monitor, events),
+        password: process.env.DASHBOARD_PASSWORD, port: Number(process.env.PORT || 3000) });
+      log('dashboard_started', { port: server.address().port, protected: Boolean(process.env.DASHBOARD_PASSWORD?.length >= 12) });
       log('started', { mode, strategy: STRATEGY, paused: bot.state.paused });
       let heartbeat = 0;
       while (!stopping) {
         await bot.tick();
+        monitor.refresh();
         if (Date.now() >= heartbeat) {
           log('heartbeat', { mode, paused: bot.state.paused, trackedOpen: bot.state.positions.filter(p => p.status !== 'closed').length });
           heartbeat = Date.now() + 300000;
@@ -57,5 +71,7 @@ try {
   log('fatal', { reason: error.message });
   process.exitCode = 1;
 } finally {
+  if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+  if (monitor?.pending) await monitor.pending;
   if (unlock) unlock();
 }

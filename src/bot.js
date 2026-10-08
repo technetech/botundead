@@ -1,14 +1,7 @@
 import { ApiError } from './api.js';
+import { STRATEGY, localTime, cycleAt, clock } from './schedule.js';
+export { STRATEGY, localTime } from './schedule.js';
 
-export const STRATEGY = Object.freeze({ symbols: ['BTC', 'ETH', 'SOL'], margin: 100, leverage: 3, timezone: 'America/Monterrey' });
-const formatter = new Intl.DateTimeFormat('en-CA', {
-  timeZone: STRATEGY.timezone, year: 'numeric', month: '2-digit', day: '2-digit',
-  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-});
-export function localTime(date) {
-  const p = Object.fromEntries(formatter.formatToParts(date).map(x => [x.type, x.value]));
-  return { day: `${p.year}-${p.month}-${p.day}`, seconds: Number(p.hour) * 3600 + Number(p.minute) * 60 + Number(p.second) };
-}
 export function normalizeHarness(text) { return text.replace(/\r\n/g, '\n').trim(); }
 export function validateAccount(account) {
   if (!Number.isFinite(account.balance_usdg) || !Array.isArray(account.open) || !Array.isArray(account.closed)
@@ -61,13 +54,16 @@ export class Bot {
     const current = localTime(this.now());
     const pending = Object.values(this.state.days).some(d => Object.values(d).some(v => v.status === 'pending'));
     if (pending) throw new Error('Apertura incierta pendiente de conciliacion manual; no se repetira');
-    const due = this.state.positions.filter(p => p.status !== 'closed' && (p.day < current.day || current.seconds >= 64500));
+    const due = this.state.positions.filter(p => p.status !== 'closed' && (p.day < current.day || (p.day === current.day && current.seconds >= (p.closeSeconds ?? 64500))));
     if (due.length) {
       await this.api.harness(); // La API requiere leer las reglas antes de operar.
       const account = validateAccount(await this.api.account());
       for (const p of due) {
         if (!account.open.some(a => a.id === p.id)) {
           p.status = 'closed';
+          const closed = account.closed.find(a => a.id === p.id);
+          if (Number.isFinite(closed?.pnl)) p.pnl = closed.pnl;
+          p.closedAt = this.now().toISOString();
           this.save();
           this.log('already_closed', { id: p.id });
           continue;
@@ -80,51 +76,54 @@ export class Bot {
         p.status = 'closing';
         this.save();
         try {
-          await this.api.close({ id: p.id, note: `undeadbot: cierre programado 17:55 America/Monterrey; entrada ${p.day} ${p.symbol}` });
+          const result = await this.api.close({ id: p.id, note: `undeadbot: cierre programado ${clock(p.closeSeconds ?? 64500)} America/Monterrey; entrada ${p.cycle ?? p.day} ${p.symbol}` });
+          if (Number.isFinite(result.pnl)) p.pnl = result.pnl;
         } catch (error) {
           if (error instanceof ApiError && !error.uncertain) { p.status = 'open'; this.save(); }
           throw error;
         }
         p.status = 'closed';
+        p.closedAt = this.now().toISOString();
         this.save();
         this.log('closed', { id: p.id, symbol: p.symbol });
       }
     }
-    // 08:50:00 a 08:50:59; un arranque tardio nunca recupera entradas.
+    // Una clave por ciclo, conservando los registros diarios de la version anterior.
+    const cycle = cycleAt(this.now());
     const started = localTime(this.started);
-    if (current.seconds < 31800 || current.seconds >= 31860
-        || (started.day === current.day && started.seconds >= 31800)
-        || this.state.days[current.day] || this.state.positions.some(p => p.status !== 'closed')) return;
-    if (this.mode === 'dry-run' && this.previewed.has(current.day)) return;
+    if (current.seconds < cycle.open || current.seconds >= cycle.open + 60
+        || (started.day === current.day && started.seconds >= cycle.open)
+        || this.state.days[cycle.key] || this.state.positions.some(p => p.status !== 'closed')) return;
+    if (this.mode === 'dry-run' && this.previewed.has(cycle.key)) return;
     const harness = await this.api.harness();
     if (typeof harness.content !== 'string' || normalizeHarness(harness.content) !== this.harness) {
       throw new Error('Harness distinto: copiar harness.md en el panel Agent antes de habilitar entradas');
     }
     const account = validateAccount(await this.api.account());
-    if (account.balance_usdg < 300) throw new Error('Saldo insuficiente: se necesitan 300 USDG libres');
+    if (account.balance_usdg < 75) throw new Error('Saldo insuficiente: se necesitan 75 USDG libres');
     const assets = await this.api.assets();
     if (!Array.isArray(assets.assets) || STRATEGY.symbols.some(s => !assets.assets.some(a => a.symbol === s && Number.isFinite(a.price_usd) && a.price_usd > 0))) {
       throw new Error('Falta un activo o un precio valido en /assets');
     }
     if (this.mode === 'dry-run') {
-      this.preview(current.day, { action: 'open', symbols: STRATEGY.symbols, margin: 100, leverage: 3 });
+      this.preview(cycle.key, { action: 'open', symbols: STRATEGY.symbols, margin: 25, leverage: 10 });
       return;
     }
-    this.state.days[current.day] = {};
+    this.state.days[cycle.key] = {};
     this.save();
     for (const symbol of STRATEGY.symbols) {
       const time = localTime(this.now());
-      if (time.day !== current.day || time.seconds >= 31860) {
+      if (time.day !== current.day || time.seconds < cycle.open || time.seconds >= cycle.open + 60) {
         this.log('entry_window_missed', { symbol });
         break;
       }
       const record = { status: 'pending' };
-      this.state.days[current.day][symbol] = record;
+      this.state.days[cycle.key][symbol] = record;
       this.save(); // Persistir la intencion ANTES de enviar la orden.
       let result;
       try {
-        result = await this.api.open({ symbol, direction: 'long', size_usd: 100, leverage: 3,
-          note: `undeadbot:${current.day}:${symbol}:long; entrada diaria 08:50 America/Monterrey; margen 100 USDG; 3x; cierre 17:55` });
+        result = await this.api.open({ symbol, direction: 'long', size_usd: 25, leverage: 10,
+          note: `undeadbot:${cycle.key}:${symbol}:long; margen 25 USDG; 10x; cierre ${clock(cycle.close)} America/Monterrey` });
       } catch (error) {
         if (error instanceof ApiError && !error.uncertain) { record.status = 'rejected'; this.save(); }
         throw error;
@@ -136,7 +135,8 @@ export class Bot {
       }
       record.status = 'opened';
       record.id = p.id;
-      this.state.positions.push({ id: p.id, symbol, day: current.day, status: 'open' });
+      this.state.positions.push({ id: p.id, symbol, day: current.day, cycle: cycle.key, closeSeconds: cycle.close,
+        margin: 25, leverage: 10, openedAt: this.now().toISOString(), status: 'open' });
       this.save();
       this.log('opened', { id: p.id, symbol });
     }
