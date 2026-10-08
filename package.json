@@ -1,0 +1,16 @@
+{
+  "name": "undeadbot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bot de paper trading programado para Undeadwallet",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/main.js",
+    "check": "node --env-file-if-exists=.env src/main.js check",
+    "status": "node --env-file-if-exists=.env src/main.js status",
+    "resume": "node --env-file-if-exists=.env src/main.js resume",
+    "test": "node --test",
+    "lint": "node --check src/main.js && node --check src/bot.js && node --check src/api.js && node --check src/store.js"
+  }
+}
