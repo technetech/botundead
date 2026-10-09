@@ -30,7 +30,14 @@ function render(value) {
     $('positions').append(row);
   }
   $('schedule').replaceChildren();
-  for (let hour = 0; hour < 24; hour += 2) { const slot = document.createElement('div'); slot.className = 'slot'; if (data.local.seconds >= hour * 3600 + 600 && data.local.seconds < (hour + 1) * 3600 + 3000) slot.classList.add('active'); slot.textContent = `${String(hour).padStart(2, '0')}:10 → ${String(hour + 1).padStart(2, '0')}:50`; $('schedule').append(slot); }
+  const clock = seconds => `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor(seconds % 3600 / 60)).padStart(2, '0')}`;
+  for (let base = 0; base < 86400; base += data.strategy.intervalSeconds) {
+    const open = base + data.strategy.openingOffsetSeconds;
+    const close = open + data.strategy.holdingSeconds;
+    const slot = document.createElement('div'); slot.className = 'slot';
+    if (data.local.seconds >= open && data.local.seconds < close) slot.classList.add('active');
+    slot.textContent = `${clock(open)} → ${clock(close)}`; $('schedule').append(slot);
+  }
   const labels = { opened: 'Posición abierta', closed: 'Posición cerrada', already_closed: 'Cierre conciliado', paused: 'Bot pausado', started: 'Bot iniciado', heartbeat: 'Bot activo', dry_run: 'Simulación sin órdenes', dashboard_started: 'Panel iniciado', entry_window_missed: 'Entrada omitida por horario' };
   $('events').replaceChildren();
   for (const event of data.events) { const li = document.createElement('li'); const at = document.createElement('time'); at.textContent = time(event.at); const text = document.createElement('span'); text.textContent = `${labels[event.event] || event.event}${event.symbol ? ` · ${event.symbol}` : ''}${event.id ? ` #${event.id}` : ''}${event.reason ? ` · ${event.reason}` : ''}`; li.append(at, text); $('events').append(li); }

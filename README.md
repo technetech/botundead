@@ -10,13 +10,13 @@ Bot de **paper trading** para Undeadwallet, en Node.js 22 y sin dependencias ext
 | Direccion | Long |
 | Margen | 25 USDG por activo; 75 USDG total |
 | Apalancamiento | 10x; exposicion inicial total de 750 USDG |
-| Apertura | Cada dos horas: 00:10, 02:10, ..., 10:10, 12:10, ..., 22:10 |
-| Cierre | 100 minutos despues: 01:50, 03:50, ..., 11:50, 13:50, ..., 23:50 |
+| Apertura | Cada dos horas: 00:25, 02:25, ..., 10:25, 12:25, ..., 22:25 |
+| Cierre | 90 minutos despues: 01:55, 03:55, ..., 11:55, 13:55, ..., 23:55 |
 | Zona | America/Monterrey, independiente del reloj del servidor |
 
-El proceso debe estar activo **antes** del inicio del ciclo. Tiene una ventana de 60 segundos para enviar las entradas, en secuencia. Un arranque a las 10:10 o despues omite ese ciclo y espera al de las 12:10. Funciona las 24 horas, incluidos fines de semana. No repite un ciclo parcialmente ejecutado. Si vuelve a arrancar despues del cierre, cierra las posiciones propias pendientes, salvo que haya una pausa por error que requiera revision. No abre nuevas posiciones mientras queden propias abiertas. La cuenta puede contener posiciones manuales: no las modifica.
+El proceso debe estar activo **antes** del inicio del ciclo. Tiene una ventana de 60 segundos para enviar las entradas, en secuencia. Un arranque a las 10:25 o despues omite ese ciclo y espera al de las 12:25. Funciona las 24 horas, incluidos fines de semana. No repite un ciclo parcialmente ejecutado. Si vuelve a arrancar despues del cierre, cierra las posiciones propias pendientes, salvo que haya una pausa por error que requiera revision. No abre nuevas posiciones mientras queden propias abiertas. La cuenta puede contener posiciones manuales: no las modifica.
 
-Las posiciones existentes de la version anterior conservan su cierre original a las 17:55. Sus IDs y registros diarios no se eliminan. Las nuevas entradas se identifican por fecha y hora, por ejemplo `2026-10-08T10:10`.
+Las posiciones ya abiertas conservan su `closeSeconds` registrado, incluso si pertenecen al horario anterior de :10 a :50. Las posiciones diarias antiguas sin ese campo conservan su cierre original a las 17:55. Sus IDs y registros no se eliminan. Las nuevas entradas se identifican por fecha y hora, por ejemplo `2026-10-08T10:25`.
 
 ## Panel web
 
@@ -66,7 +66,7 @@ npm.cmd start
 3. Agregar un **volumen persistente** montado en `/data`. Configurar `DATA_DIR=/data`. Sin volumen, perder los IDs puede dejar posiciones sin gestionar o permitir duplicados tras redeploys.
 4. Configurar `UNDEAD_API_KEY`, `DASHBOARD_PASSWORD` y comenzar con `BOT_MODE=dry-run`. Mantener **una sola replica**, sin suspension/serverless. No ejecutar al mismo tiempo otra copia local ni otro servicio con la misma key.
 5. Ejecutar `node src/main.js check` en el entorno del servicio, o hacer la comprobacion en local antes del despliegue. Revisar los logs de inicio y heartbeat. No se usa el antiguo campo Harness remoto.
-6. Cuando la comprobacion autenticada sea correcta, cambiar `BOT_MODE=live` y desplegar **antes del siguiente ciclo de Monterrey**. Por ejemplo, a las 10:10 revisar tres eventos `opened`; a las 11:50, tres `closed`.
+6. Cuando la comprobacion autenticada sea correcta, cambiar `BOT_MODE=live` y desplegar **antes del siguiente ciclo de Monterrey**. Por ejemplo, a las 10:25 revisar tres eventos `opened`; a las 11:55, tres `closed`.
 
 Los nombres de opciones de Railway pueden cambiar; los requisitos son un proceso continuo, un volumen y una sola instancia. Se configuran 120 segundos de margen para finalizar solicitudes y liberar el lock durante un despliegue. Referencias: [configuracion como codigo](https://docs.railway.com/config-as-code/reference), [volumenes](https://docs.railway.com/volumes) y [Serverless](https://docs.railway.com/deployments/serverless). No esta desplegado ni conectado a una cuenta por el hecho de subirlo a GitHub.
 
@@ -80,8 +80,8 @@ El proceso consulta el reloj cada 5 segundos, emite heartbeat cada 5 minutos y c
 
 ### Recuperacion
 
-1. Detener la instancia. Revisar el motivo en logs y el estado con `npm run status` (en Docker, `node src/main.js status`). Comparar con el panel Undeadwallet y las notas `undeadbot:FECHAT10:10:SIMBOLO:long` (o las notas diarias antiguas).
-2. Para una apertura `pending`, identificar la operacion real de forma inequivoca. Si existe, conservar su ID en el registro del ciclo con `status: "opened"` e `id`, y agregar a `positions` un objeto como `{ "id": ID, "symbol": "BTC", "day": "2026-10-08", "cycle": "2026-10-08T10:10", "closeSeconds": 42600, "margin": 25, "leverage": 10, "status": "open" }`, adaptado a su fecha, activo y horario real. `closeSeconds` son segundos desde medianoche local (11:50 = 42600). Para posiciones diarias heredadas conservar el formato antiguo. Si ya esta cerrada usar `status: "closed"`. Si se confirma que nunca se abrio, cambiar la entrada del ciclo a `status: "rejected"`. **No borrar el ciclo**. No inferir propiedad solo por simbolo o monto: podria ser una posicion manual. Si no hay certeza, dejar pausado y revisar con el proveedor.
+1. Detener la instancia. Revisar el motivo en logs y el estado con `npm run status` (en Docker, `node src/main.js status`). Comparar con el panel Undeadwallet y las notas `undeadbot:FECHAT10:25:SIMBOLO:long` (o las notas diarias antiguas).
+2. Para una apertura `pending`, identificar la operacion real de forma inequivoca. Si existe, conservar su ID en el registro del ciclo con `status: "opened"` e `id`, y agregar a `positions` un objeto como `{ "id": ID, "symbol": "BTC", "day": "2026-10-08", "cycle": "2026-10-08T10:25", "closeSeconds": 42900, "margin": 25, "leverage": 10, "status": "open" }`, adaptado a su fecha, activo y horario real. `closeSeconds` son segundos desde medianoche local (11:55 = 42900). Para posiciones diarias heredadas conservar el formato antiguo. Si ya esta cerrada usar `status: "closed"`. Si se confirma que nunca se abrio, cambiar la entrada del ciclo a `status: "rejected"`. **No borrar el ciclo**. No inferir propiedad solo por simbolo o monto: podria ser una posicion manual. Si no hay certeza, dejar pausado y revisar con el proveedor.
 3. Para una posicion `closing`, verificar la cuenta. Si ya cerro, usar `status: "closed"`; si sigue abierta y se confirma que el cierre no se ejecuto, usar `status: "open"`. Conservar todos los IDs y hacer respaldo antes de editar.
 4. Corregir la causa del error. Ejecutar `npm run resume` (o `node src/main.js resume`) con el bot detenido. Solo elimina la pausa; se niega si quedan ordenes inciertas. Reiniciar. Las entradas de un ciclo ya registrado no se vuelven a intentar; los cierres vencidos se procesan.
 

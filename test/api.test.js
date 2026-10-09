@@ -20,11 +20,11 @@ test('API 1.4 learns before sending scheduled orders; never requests legacy harn
     } else assert.fail(`Unexpected route ${path}`);
     return Response.json(data);
   });
-  let now = new Date('2026-10-09T14:09:50Z');
+  let now = new Date('2026-10-09T14:24:50Z');
   let saved = initialState();
   const bot = new Bot({ api, harness: 'local strategy', mode: 'live', now: () => now,
     store: { load: () => saved, save: state => { saved = structuredClone(state); } } });
-  now = new Date('2026-10-09T14:10:00Z');
+  now = new Date('2026-10-09T14:25:00Z');
   await bot.tick();
   assert.equal(saved.paused, null);
   assert.deepEqual(paths, ['learn', 'account', 'assets', 'open', 'open', 'open']);

@@ -1,4 +1,4 @@
-export const STRATEGY = Object.freeze({ symbols: ['BTC', 'ETH', 'SOL'], margin: 25, leverage: 10, timezone: 'America/Monterrey' });
+export const STRATEGY = Object.freeze({ symbols: ['BTC', 'ETH', 'SOL'], margin: 25, leverage: 10, timezone: 'America/Monterrey', intervalSeconds: 7200, openingOffsetSeconds: 1500, holdingSeconds: 5400 });
 const formatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: STRATEGY.timezone, year: 'numeric', month: '2-digit', day: '2-digit',
   hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
@@ -12,8 +12,8 @@ export function clock(seconds) {
 }
 export function cycleAt(date) {
   const time = localTime(date);
-  const open = Math.floor(time.seconds / 7200) * 7200 + 600;
-  return { day: time.day, open, close: open + 6000, key: `${time.day}T${clock(open)}` };
+  const open = Math.floor(time.seconds / STRATEGY.intervalSeconds) * STRATEGY.intervalSeconds + STRATEGY.openingOffsetSeconds;
+  return { day: time.day, open, close: open + STRATEGY.holdingSeconds, key: `${time.day}T${clock(open)}` };
 }
 export function nextOpening(date) {
   let candidate = new Date(date);
@@ -21,7 +21,7 @@ export function nextOpening(date) {
   candidate.setUTCSeconds(0, 0);
   for (let i = 0; i <= 24 * 60; i++) {
     const local = localTime(candidate);
-    if (candidate > date && local.seconds % 7200 === 600) return candidate.toISOString();
+    if (candidate > date && local.seconds % STRATEGY.intervalSeconds === STRATEGY.openingOffsetSeconds) return candidate.toISOString();
     candidate = new Date(candidate.getTime() + 60000);
   }
   throw new Error('No se encontro el siguiente ciclo');

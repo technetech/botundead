@@ -48,7 +48,7 @@ test('snapshot selects known IDs and never serializes secrets or raw account dat
   const result = snapshot(bot, monitor, [], new Date('2026-10-08T16:20:00Z'));
   assert.equal(result.positions.length, 1); assert.equal(result.positions[0].pnl, 5);
   assert.equal(result.positions[0].closeAt, '2026-10-08 11:50');
-  assert.equal(result.nextOpening, '2026-10-08T18:10:00.000Z');
+  assert.equal(result.nextOpening, '2026-10-08T16:25:00.000Z');
   assert.equal(JSON.stringify(result).includes('never-expose'), false);
   assert.equal(JSON.stringify(result).includes('private'), false);
 });

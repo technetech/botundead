@@ -9,7 +9,7 @@ import { Store, initialState } from '../src/store.js';
 import { nextOpening } from '../src/schedule.js';
 
 function fixture(options = {}) {
-  let time = new Date('2026-10-08T16:09:50Z');
+  let time = new Date('2026-10-08T16:24:50Z');
   let saved = initialState();
   const orders = [];
   const closes = [];
@@ -33,12 +33,12 @@ function fixture(options = {}) {
 }
 
 test('Monterrey schedule uses the explicit zone, not the host timezone', () => {
-  assert.deepEqual(localTime(new Date('2026-10-08T16:10:00Z')), { day: '2026-10-08', seconds: 36600 });
+  assert.deepEqual(localTime(new Date('2026-10-08T16:25:00Z')), { day: '2026-10-08', seconds: 37500 });
 });
 
 test('opens exactly three 25 USDG longs at 10x, survives restart, closes only owned IDs', async () => {
   const f = fixture();
-  f.setTime('2026-10-08T16:10:00Z');
+  f.setTime('2026-10-08T16:25:00Z');
   await f.bot.tick();
   await f.bot.tick();
   await f.makeBot().tick();
@@ -47,7 +47,7 @@ test('opens exactly three 25 USDG longs at 10x, survives restart, closes only ow
     assert.equal(o.direction, 'long'); assert.equal(o.size_usd, 25); assert.equal(o.leverage, 10);
     assert.ok(o.note.length <= 500);
   }
-  f.setTime('2026-10-08T17:50:00Z');
+  f.setTime('2026-10-08T17:55:00Z');
   await f.makeBot().tick();
   assert.deepEqual(f.closes.map(p => p.id), [101, 102, 103]);
   assert.equal(f.positions[0].id, 90);
@@ -55,7 +55,7 @@ test('opens exactly three 25 USDG longs at 10x, survives restart, closes only ow
 
 test('late startup skips entry; old positions close on reconnection', async () => {
   const f = fixture();
-  f.setTime('2026-10-08T16:10:00Z');
+  f.setTime('2026-10-08T16:25:00Z');
   await f.makeBot().tick();
   assert.equal(f.orders.length, 0);
   await f.bot.tick();
@@ -67,7 +67,7 @@ test('late startup skips entry; old positions close on reconnection', async () =
 test('dry-run never mutates the API and previews once', async () => {
   const events = [];
   const f = fixture({ mode: 'dry-run', log: event => events.push(event) });
-  f.setTime('2026-10-08T16:10:00Z');
+  f.setTime('2026-10-08T16:25:00Z');
   await f.bot.tick(); await f.bot.tick();
   assert.equal(f.orders.length, 0);
   assert.deepEqual(events, ['dry_run']);
@@ -79,7 +79,7 @@ test('insufficient balance and failed API learning stop before any order', async
     f => { f.api.learn = async () => { throw new ApiError('/learn: HTTP 401, missing_or_bad_key'); }; },
   ]) {
     const f = fixture(); change(f);
-    f.setTime('2026-10-08T16:10:00Z');
+    f.setTime('2026-10-08T16:25:00Z');
     await f.bot.tick();
     assert.equal(f.orders.length, 0);
     assert.ok(f.store.load().paused);
@@ -90,10 +90,10 @@ test('uncertain opening is persisted before transmission and never repeated afte
   const f = fixture(); let calls = 0;
   f.api.open = async () => {
     calls++;
-    assert.equal(f.store.load().days['2026-10-08T10:10'].BTC.status, 'pending');
+    assert.equal(f.store.load().days['2026-10-08T10:25'].BTC.status, 'pending');
     throw new ApiError('timeout', true);
   };
-  f.setTime('2026-10-08T16:10:00Z');
+  f.setTime('2026-10-08T16:25:00Z');
   await f.bot.tick();
   const persisted = f.store.load(); persisted.paused = null; f.store.save(persisted);
   await f.makeBot().tick();
@@ -105,27 +105,27 @@ test('definitive rejection is not retried and a malformed success remains uncert
   for (const uncertain of [false, true]) {
     const f = fixture(); let calls = 0;
     f.api.open = async () => { calls++; if (uncertain) return {}; throw new ApiError('bad_params', false); };
-    f.setTime('2026-10-08T16:10:00Z');
+    f.setTime('2026-10-08T16:25:00Z');
     await f.bot.tick(); await f.bot.tick();
     assert.equal(calls, 1);
-    assert.equal(f.store.load().days['2026-10-08T10:10'].BTC.status, uncertain ? 'pending' : 'rejected');
+    assert.equal(f.store.load().days['2026-10-08T10:25'].BTC.status, uncertain ? 'pending' : 'rejected');
   }
 });
 
 test('entry window expires during requests: remaining symbols are skipped', async () => {
   const f = fixture(); const open = f.api.open;
-  f.api.open = async body => { const result = await open(body); f.setTime('2026-10-08T16:11:00Z'); return result; };
-  f.setTime('2026-10-08T16:10:00Z');
+  f.api.open = async body => { const result = await open(body); f.setTime('2026-10-08T16:26:00Z'); return result; };
+  f.setTime('2026-10-08T16:25:00Z');
   await f.bot.tick();
   assert.equal(f.orders.length, 1);
 });
 
 test('uncertain close is never repeated blindly', async () => {
   const f = fixture();
-  f.setTime('2026-10-08T16:10:00Z'); await f.bot.tick();
+  f.setTime('2026-10-08T16:25:00Z'); await f.bot.tick();
   let calls = 0;
   f.api.close = async () => { calls++; throw new ApiError('timeout', true); };
-  f.setTime('2026-10-08T17:50:00Z'); await f.bot.tick();
+  f.setTime('2026-10-08T17:55:00Z'); await f.bot.tick();
   const state = f.store.load(); state.paused = null; f.store.save(state);
   await f.makeBot().tick();
   assert.equal(calls, 1);
@@ -133,9 +133,9 @@ test('uncertain close is never repeated blindly', async () => {
 
 test('manually closed positions are reconciled without another close', async () => {
   const f = fixture();
-  f.setTime('2026-10-08T16:10:00Z'); await f.bot.tick();
+  f.setTime('2026-10-08T16:25:00Z'); await f.bot.tick();
   f.positions.splice(1, 1);
-  f.setTime('2026-10-08T17:50:00Z'); await f.bot.tick();
+  f.setTime('2026-10-08T17:55:00Z'); await f.bot.tick();
   assert.deepEqual(f.closes.map(p => p.id), [102, 103]);
 });
 
@@ -175,28 +175,28 @@ test('disk state survives reload; lock excludes another process; corrupt state f
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('cycles repeat at 10:10 and 12:10 with 100-minute closes and no restart duplicates', async () => {
+test('cycles repeat at 10:25 and 12:25 with 90-minute closes and no restart duplicates', async () => {
   const f = fixture();
-  f.setTime('2026-10-08T16:10:00Z'); await f.bot.tick();
-  f.setTime('2026-10-08T17:49:59Z'); await f.bot.tick(); assert.equal(f.closes.length, 0);
-  f.setTime('2026-10-08T17:50:00Z'); await f.bot.tick(); assert.equal(f.closes.length, 3);
-  f.setTime('2026-10-08T18:09:50Z'); const restarted = f.makeBot();
-  f.setTime('2026-10-08T18:10:00Z'); await restarted.tick(); await restarted.tick();
+  f.setTime('2026-10-08T16:25:00Z'); await f.bot.tick();
+  f.setTime('2026-10-08T17:54:59Z'); await f.bot.tick(); assert.equal(f.closes.length, 0);
+  f.setTime('2026-10-08T17:55:00Z'); await f.bot.tick(); assert.equal(f.closes.length, 3);
+  f.setTime('2026-10-08T18:24:50Z'); const restarted = f.makeBot();
+  f.setTime('2026-10-08T18:25:00Z'); await restarted.tick(); await restarted.tick();
   assert.equal(f.orders.length, 6);
-  assert.ok(f.store.load().days['2026-10-08T12:10']);
-  f.setTime('2026-10-08T19:50:00Z'); await restarted.tick(); assert.equal(f.closes.length, 6);
+  assert.ok(f.store.load().days['2026-10-08T12:25']);
+  f.setTime('2026-10-08T19:55:00Z'); await restarted.tick(); assert.equal(f.closes.length, 6);
 });
 
 test('24-hour schedule crosses midnight and executes overnight', async () => {
   const f = fixture();
-  f.setTime('2026-10-09T04:10:00Z'); await f.bot.tick();
-  assert.ok(f.store.load().days['2026-10-08T22:10']);
-  f.setTime('2026-10-09T05:50:00Z'); await f.bot.tick();
-  f.setTime('2026-10-09T06:10:00Z'); await f.bot.tick();
-  assert.ok(f.store.load().days['2026-10-09T00:10']);
-  f.setTime('2026-10-09T07:50:00Z'); await f.bot.tick();
+  f.setTime('2026-10-09T04:25:00Z'); await f.bot.tick();
+  assert.ok(f.store.load().days['2026-10-08T22:25']);
+  f.setTime('2026-10-09T05:55:00Z'); await f.bot.tick();
+  f.setTime('2026-10-09T06:25:00Z'); await f.bot.tick();
+  assert.ok(f.store.load().days['2026-10-09T00:25']);
+  f.setTime('2026-10-09T07:55:00Z'); await f.bot.tick();
   assert.equal(f.orders.length, 6); assert.equal(f.closes.length, 6);
-  assert.equal(nextOpening(new Date('2026-10-09T05:51:00Z')), '2026-10-09T06:10:00.000Z');
+  assert.equal(nextOpening(new Date('2026-10-09T05:51:00Z')), '2026-10-09T06:25:00.000Z');
 });
 
 test('legacy state preserves IDs and closes at 17:55, not on the new schedule', async () => {
@@ -205,16 +205,28 @@ test('legacy state preserves IDs and closes at 17:55, not on the new schedule', 
   state.days['2026-10-08'] = { BTC: { status: 'opened', id: 90 } };
   state.positions.push({ id: 90, symbol: 'BTC', day: '2026-10-08', status: 'open' });
   f.store.save(state); const migrated = f.makeBot();
-  f.setTime('2026-10-08T16:10:00Z'); await migrated.tick(); assert.equal(f.orders.length, 0);
-  f.setTime('2026-10-08T23:50:00Z'); await migrated.tick(); assert.equal(f.closes.length, 0);
+  f.setTime('2026-10-08T16:25:00Z'); await migrated.tick(); assert.equal(f.orders.length, 0);
+  f.setTime('2026-10-08T23:54:59Z'); await migrated.tick(); assert.equal(f.closes.length, 0);
   f.setTime('2026-10-08T23:55:00Z'); await migrated.tick(); assert.equal(f.closes[0].id, 90);
   assert.ok(f.store.load().days['2026-10-08']);
+});
+
+test('existing positions keep their previous recorded closing time after schedule change', async () => {
+  const f = fixture();
+  const state = f.store.load();
+  state.positions.push({ id: 90, symbol: 'BTC', day: '2026-10-08', cycle: '2026-10-08T10:10', closeSeconds: 42600, status: 'open' });
+  f.store.save(state);
+  const bot = f.makeBot();
+  f.setTime('2026-10-08T17:49:59Z'); await bot.tick();
+  assert.equal(f.closes.length, 0);
+  f.setTime('2026-10-08T17:50:00Z'); await bot.tick();
+  assert.deepEqual(f.closes.map(p => p.id), [90]);
 });
 
 test('PnL returned by close is persisted for the dashboard after a restart', async () => {
   const f = fixture(); const close = f.api.close;
   f.api.close = async body => { await close(body); return { ok: true, pnl: 2.5 }; };
-  f.setTime('2026-10-08T16:10:00Z'); await f.bot.tick();
-  f.setTime('2026-10-08T17:50:00Z'); await f.bot.tick();
+  f.setTime('2026-10-08T16:25:00Z'); await f.bot.tick();
+  f.setTime('2026-10-08T17:55:00Z'); await f.bot.tick();
   assert.equal(f.makeBot().state.positions[0].pnl, 2.5);
 });
