@@ -2,12 +2,12 @@ import http from 'node:http';
 import fs from 'node:fs';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { STRATEGY, localTime, nextOpening, clock, cycleAt } from './schedule.js';
-import { normalizeHarness, validateAccount } from './bot.js';
+import { validateAccount } from './bot.js';
 
 export class Monitor {
   constructor(api, harness, now = () => new Date()) {
     this.api = api; this.harness = harness; this.now = now;
-    this.account = null; this.updatedAt = null; this.error = null; this.harnessMatches = null;
+    this.account = null; this.updatedAt = null; this.error = null; this.apiReady = null; this.learnVersion = null;
     this.nextRead = 0; this.pending = null;
   }
   refresh() {
@@ -15,11 +15,12 @@ export class Monitor {
     this.nextRead = this.now().getTime() + 60000;
     this.pending = (async () => {
       try {
-        const rules = await this.api.harness();
-        this.harnessMatches = typeof rules.content === 'string' && normalizeHarness(rules.content) === normalizeHarness(this.harness);
+        const learned = await this.api.learn();
+        this.learnVersion = learned.learn_version;
+        this.apiReady = true;
         this.account = validateAccount(await this.api.account());
         this.updatedAt = this.now().toISOString();
-      } catch (error) { this.error = error.message; }
+      } catch (error) { this.error = error.message; this.apiReady = false; }
       finally { this.pending = null; }
     })();
   }
@@ -44,9 +45,9 @@ export function snapshot(bot, monitor, events, now = new Date()) {
   const entering = current.seconds >= cycle.open && current.seconds < cycle.open + 60
     && (started.day < current.day || started.seconds < cycle.open) && !bot.state.days[cycle.key];
   return { now: now.toISOString(), mode: bot.mode, paused: bot.state.paused, strategy: STRATEGY,
-    local: current, nextOpening: nextOpening(now), entering, nextOpeningBlocked: Boolean(bot.state.paused || tracked.length || monitor.harnessMatches !== true),
+    local: current, nextOpening: nextOpening(now), entering, nextOpeningBlocked: Boolean(bot.state.paused || tracked.length || monitor.apiReady !== true),
     balance: account?.balance_usdg ?? null, equity: Number.isFinite(account?.equity_usdg) ? account.equity_usdg : null,
-    accountUpdatedAt: monitor.updatedAt, accountError: monitor.error, harnessMatches: monitor.harnessMatches,
+    accountUpdatedAt: monitor.updatedAt, accountError: monitor.error, apiReady: monitor.apiReady, learnVersion: monitor.learnVersion,
     harness: bot.harness, positions: [...tracked, ...positions.filter(p => p.status === 'closed').slice(-60).reverse()],
     trackedOpen: tracked.length, accountOpen: account?.open.length ?? null, events: events.slice(-60).reverse() };
 }

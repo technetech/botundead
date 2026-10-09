@@ -32,12 +32,13 @@ export class Bot {
   }
 
   async check() {
-    const harness = await this.api.harness();
+    const learned = await this.api.learn();
     const account = validateAccount(await this.api.account());
     const assets = await this.api.assets();
     if (!Array.isArray(assets.assets)) throw new Error('Contrato /assets inesperado');
     return {
-      harnessMatches: typeof harness.content === 'string' && normalizeHarness(harness.content) === this.harness,
+      apiReady: true,
+      learnVersion: learned.learn_version,
       balance: account.balance_usdg,
       openPositions: account.open.length,
       symbolsAvailable: STRATEGY.symbols.every(s => assets.assets.some(a => a.symbol === s)),
@@ -56,7 +57,7 @@ export class Bot {
     if (pending) throw new Error('Apertura incierta pendiente de conciliacion manual; no se repetira');
     const due = this.state.positions.filter(p => p.status !== 'closed' && (p.day < current.day || (p.day === current.day && current.seconds >= (p.closeSeconds ?? 64500))));
     if (due.length) {
-      await this.api.harness(); // La API requiere leer las reglas antes de operar.
+      await this.api.learn(); // La API marca la key con la version vigente antes de operar.
       const account = validateAccount(await this.api.account());
       for (const p of due) {
         if (!account.open.some(a => a.id === p.id)) {
@@ -95,10 +96,7 @@ export class Bot {
         || (started.day === current.day && started.seconds >= cycle.open)
         || this.state.days[cycle.key] || this.state.positions.some(p => p.status !== 'closed')) return;
     if (this.mode === 'dry-run' && this.previewed.has(cycle.key)) return;
-    const harness = await this.api.harness();
-    if (typeof harness.content !== 'string' || normalizeHarness(harness.content) !== this.harness) {
-      throw new Error('Harness distinto: copiar harness.md en el panel Agent antes de habilitar entradas');
-    }
+    await this.api.learn();
     const account = validateAccount(await this.api.account());
     if (account.balance_usdg < 75) throw new Error('Saldo insuficiente: se necesitan 75 USDG libres');
     const assets = await this.api.assets();

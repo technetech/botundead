@@ -16,7 +16,7 @@ function fixture(options = {}) {
   const positions = [{ id: 90, symbol: 'BTC', direction: 'long', status: 'open' }];
   let id = 100;
   const api = {
-    harness: async () => ({ content: 'rules' }),
+    learn: async () => ({ learn_version: 'test-v1' }),
     account: async () => ({ balance_usdg: 1000, open: positions, closed: [] }),
     assets: async () => ({ assets: ['BTC', 'ETH', 'SOL'].map(symbol => ({ symbol, price_usd: 100 })) }),
     open: async body => {
@@ -73,10 +73,10 @@ test('dry-run never mutates the API and previews once', async () => {
   assert.deepEqual(events, ['dry_run']);
 });
 
-test('insufficient balance and mismatched harness stop before any order', async () => {
+test('insufficient balance and failed API learning stop before any order', async () => {
   for (const change of [
     f => { f.api.account = async () => ({ balance_usdg: 74, open: [], closed: [] }); },
-    f => { f.api.harness = async () => ({ content: 'different strategy' }); },
+    f => { f.api.learn = async () => { throw new ApiError('/learn: HTTP 401, missing_or_bad_key'); }; },
   ]) {
     const f = fixture(); change(f);
     f.setTime('2026-10-08T16:10:00Z');

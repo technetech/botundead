@@ -16,7 +16,7 @@ function render(value) {
   $('updated').textContent = data.accountUpdatedAt ? `Cuenta consultada: ${new Intl.DateTimeFormat('es-MX', { timeZone: 'America/Monterrey', dateStyle: 'short', timeStyle: 'medium' }).format(new Date(data.accountUpdatedAt))} · ${data.accountOpen} posiciones totales en la cuenta` : 'Esperando primera consulta a Undeadwallet';
   $('alerts').replaceChildren();
   if (data.paused) alert(`Bot pausado: ${data.paused}. Los cierres automáticos también están pausados.`, true);
-  if (data.harnessMatches === false) alert('Actualiza el Harness en Undeadwallet con las reglas que aparecen al final de esta página. Sin coincidencia no se abrirán posiciones.');
+  if (data.apiReady === false) alert('No se pudo validar la conexión con la API de Undeadwallet mediante /learn.', true);
   if (data.accountError) alert(`No se pudo actualizar la cuenta: ${data.accountError}. La lectura automática está detenida hasta reiniciar; los datos mostrados pueden estar desactualizados.`, true);
   if (data.mode !== 'live') alert('Modo de prueba: el bot muestra decisiones pero no abre ni cierra posiciones. Para operar configura BOT_MODE=live.');
   $('positions').replaceChildren();

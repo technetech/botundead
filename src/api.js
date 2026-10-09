@@ -26,8 +26,11 @@ export class Api {
         redirect: 'error',
       });
       data = await response.json();
-    } catch {
-      throw new ApiError(`${path}: fallo de red, timeout o respuesta no JSON`, mutation);
+    } catch (error) {
+      const detail = response
+        ? `HTTP ${response.status}, respuesta no JSON`
+        : `${error?.name === 'TimeoutError' ? 'timeout de 15 segundos' : 'fallo de conexion'} (${String(error?.cause?.code || error?.name || 'Error')})`;
+      throw new ApiError(`${path}: ${detail}`, mutation);
     }
     if (!response.ok || data?.ok !== true) {
       // Solo los rechazos explicitos 4xx/503 se consideran definitivos.
@@ -38,7 +41,13 @@ export class Api {
     return data;
   }
 
-  harness() { return this.request('/harness'); }
+  async learn() {
+    const data = await this.request('/learn');
+    if (typeof data.learn_version !== 'string' || !data.learn_version.trim()) {
+      throw new ApiError('/learn: falta learn_version; contrato inesperado');
+    }
+    return data;
+  }
   assets() { return this.request('/assets'); }
   account() { return this.request('/account'); }
   open(body) { return this.request('/open', body); }

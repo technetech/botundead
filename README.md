@@ -24,14 +24,14 @@ El mismo servicio sirve un panel privado, adaptable a movil, con saldo y patrimo
 
 Configurar `DASHBOARD_PASSWORD` con una contrasena nueva de al menos 12 caracteres. El usuario es **admin**. La contrasena del panel es independiente de `UNDEAD_API_KEY`; ninguna se envia en las respuestas del panel. Sin contrasena valida, el servidor solo muestra instrucciones de configuracion y no revela el estado de la cuenta. En local abrir `http://localhost:3000`; en Railway usar el dominio HTTPS del servicio.
 
-El navegador actualiza la vista cada 5 segundos desde la memoria del servidor; el servidor consulta la cuenta y el harness cada 60 segundos independientemente del numero de visitantes. Los precios y PnL son la ultima lectura, no un feed en tiempo real. Si una lectura falla, el panel muestra el error, conserva la fecha de la ultima lectura y no vuelve a consultar automaticamente hasta reiniciar. Un fallo del monitor no envia ordenes ni pausa por si mismo el motor de operaciones.
+El navegador actualiza la vista cada 5 segundos desde la memoria del servidor; el servidor consulta la cuenta y /learn cada 60 segundos independientemente del numero de visitantes. Los precios y PnL son la ultima lectura, no un feed en tiempo real. Si una lectura falla, el panel muestra el error, conserva la fecha de la ultima lectura y no vuelve a consultar automaticamente hasta reiniciar. Un fallo del monitor no envia ordenes ni pausa por si mismo el motor de operaciones.
 
 ### Actualizar un despliegue existente
 
-1. Copiar el **nuevo** `harness.md` completo al panel Agent de Undeadwallet. Si sigue el texto anterior, el bot rechazara las nuevas entradas.
+1. Desplegar la integracion API 1.4: usa `/learn` en lugar de la ruta retirada `/harness`. `harness.md` describe la estrategia local; no hay que copiarlo al proveedor.
 2. Agregar `DASHBOARD_PASSWORD` en las variables de Railway. Mantener `UNDEAD_API_KEY`, `DATA_DIR=/data` y el volumen existente. Para ejecutar ordenes virtuales, usar `BOT_MODE=live`.
 3. Desplegar la nueva version antes del siguiente ciclo. En Settings → Networking → Public Networking, usar **Generate Domain** y el puerto HTTP del servicio (`PORT`, o 3000 si no esta definido). Entrar al dominio HTTPS con usuario `admin` y la contrasena elegida. Ver [red publica de Railway](https://docs.railway.com/networking/public-networking). El healthcheck `/health` solo indica que el proceso HTTP responde; el panel muestra por separado pausas, modo y errores de cuenta.
-4. Verificar en el panel que las reglas coincidan y que el modo sea Automatico. Un deploy saludable solo demuestra que el servidor arranco, no que se hayan enviado ordenes. Si hay una pausa persistida, resolverla con el procedimiento de recuperacion de abajo; un redeploy no borra pausas.
+4. Ejecutar `node src/main.js check` en el servicio y verificar `apiReady: true`, `learnVersion`, saldo y activos disponibles. Verificar que el panel muestre datos de cuenta actualizados y modo Automatico. Un deploy saludable solo demuestra que el servidor arranco, no que se hayan enviado ordenes. Si hay una pausa persistida, resolverla con el procedimiento de recuperacion de abajo; un redeploy no borra pausas.
 
 No hay stop-loss ni take-profit. El servidor determina precios y liquidaciones; los precios tienen cache de 240 segundos y el servidor rechaza precios demasiado antiguos. El bot no garantiza ejecucion al segundo exacto ni cierre durante interrupciones. La estrategia no implica rentabilidad.
 
@@ -48,14 +48,14 @@ Copy-Item .env.example .env
 
 Editar `.env` localmente y poner **solo** la API key de Undeadwallet en `UNDEAD_API_KEY`. `.env` y `data/` estan excluidos de Git y de la imagen Docker. No pegar claves en el chat ni en GitHub.
 
-Antes de operar, copiar el contenido completo de `harness.md` al campo Harness del panel Agent de Undeadwallet. La API exige leerlo. El bot verifica coincidencia con ese archivo antes de abrir (tolera finales de linea Windows y espacios externos). Si las reglas cambian, pausa las entradas; la estrategia del codigo no se reprograma interpretando texto.
+Antes de abrir o cerrar, el bot consulta `/learn` y exige una `learn_version` no vacia. Segun el contrato API 1.4, esa lectura marca la API key con la version vigente; sin ella el proveedor rechaza ordenes con HTTP 428. No se agrega un campo de version a las ordenes porque el contrato publicado no lo exige. `harness.md` es una descripcion local; la estrategia se ejecuta en el codigo y no se reprograma interpretando texto del proveedor.
 
 ```powershell
 npm.cmd run check
 npm.cmd start
 ```
 
-`check` hace solo tres lecturas: harness, cuenta y activos; muestra si las reglas coinciden, saldo y disponibilidad de simbolos. No muestra la clave ni abre posiciones. Devuelve error si no estan las condiciones iniciales. El contrato autenticado todavia debe validarse con una key real; la documentacion publica ofrece ejemplos pero no un esquema completo de posiciones.
+`check` hace solo tres lecturas: /learn, cuenta y activos; muestra `apiReady`, `learnVersion`, saldo y disponibilidad de simbolos. No muestra la clave ni abre posiciones. Devuelve error si no estan las condiciones iniciales. El contrato autenticado todavia debe validarse con una key real; la documentacion publica ofrece ejemplos pero no un esquema completo de posiciones.
 
 `BOT_MODE=dry-run` es el valor inicial: consulta y muestra decisiones a la hora programada, **sin enviar ninguna orden**. No simula ganancias ni crea posiciones ficticias. Para ejecutar sobre el saldo virtual, cambiar a `BOT_MODE=live` y reiniciar. No existe un comando de apertura inmediata: las entradas respetan el horario.
 
@@ -65,7 +65,7 @@ npm.cmd start
 2. Crear en Railway un servicio desde ese repositorio. El `Dockerfile` define el proceso; `railway.json` define el despliegue. El panel escucha en `PORT` (3000 por defecto). Generar un dominio HTTPS para acceder al panel. No necesita cron externo.
 3. Agregar un **volumen persistente** montado en `/data`. Configurar `DATA_DIR=/data`. Sin volumen, perder los IDs puede dejar posiciones sin gestionar o permitir duplicados tras redeploys.
 4. Configurar `UNDEAD_API_KEY`, `DASHBOARD_PASSWORD` y comenzar con `BOT_MODE=dry-run`. Mantener **una sola replica**, sin suspension/serverless. No ejecutar al mismo tiempo otra copia local ni otro servicio con la misma key.
-5. Copiar `harness.md` al panel Agent. Ejecutar `node src/main.js check` en el entorno del servicio, o hacer la comprobacion en local antes del despliegue. Revisar los logs de inicio y heartbeat.
+5. Ejecutar `node src/main.js check` en el entorno del servicio, o hacer la comprobacion en local antes del despliegue. Revisar los logs de inicio y heartbeat. No se usa el antiguo campo Harness remoto.
 6. Cuando la comprobacion autenticada sea correcta, cambiar `BOT_MODE=live` y desplegar **antes del siguiente ciclo de Monterrey**. Por ejemplo, a las 10:10 revisar tres eventos `opened`; a las 11:50, tres `closed`.
 
 Los nombres de opciones de Railway pueden cambiar; los requisitos son un proceso continuo, un volumen y una sola instancia. Se configuran 120 segundos de margen para finalizar solicitudes y liberar el lock durante un despliegue. Referencias: [configuracion como codigo](https://docs.railway.com/config-as-code/reference), [volumenes](https://docs.railway.com/volumes) y [Serverless](https://docs.railway.com/deployments/serverless). No esta desplegado ni conectado a una cuenta por el hecho de subirlo a GitHub.
@@ -91,4 +91,4 @@ El proceso consulta el reloj cada 5 segundos, emite heartbeat cada 5 minutos y c
 
 `npm test` usa una API simulada y verifica ciclos, medianoche, compatibilidad de posiciones antiguas, tamanos, cierres propios, reinicios, entradas tardias, timeout, rechazos, dry-run y almacenamiento. Tambien prueba el servidor HTTP local, autenticacion, seleccion de datos y cache del panel. No requiere key ni conexion externa. GitHub Actions ejecuta pruebas y comprobaciones de sintaxis en cada push/PR.
 
-Contrato implementado a partir del [SDK publico](https://undeadwallet.com/api/trading/agent/sdkagent) y [OpenAPI](https://undeadwallet.com/api/trading/agent/docsapi), version 1.0, consultados el 8 de octubre de 2026. Falta la prueba autenticada de lectura y la primera ejecucion de paper trading supervisada.
+Contrato actualizado a partir del [OpenAPI](https://undeadwallet.com/api/trading/agent/docsapi), version 1.4, consultado el 9 de octubre de 2026. La antigua ruta /harness devuelve HTTP 404 con HTML; los errores ahora conservan el estado HTTP cuando la respuesta no es JSON y distinguen timeout de fallos de conexion. Falta la prueba autenticada de lectura en el despliegue y la primera ejecucion de paper trading supervisada.

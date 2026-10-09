@@ -33,13 +33,13 @@ test('missing dashboard password never exposes private data', async () => {
 
 test('monitor caches reads and stops automatic retries after failure', async () => {
   let now = new Date('2026-10-08T16:00:00Z'); let calls = 0;
-  const monitor = new Monitor({ harness: async () => ({ content: 'rules' }), account: async () => { calls++; return { balance_usdg: 100, open: [], closed: [] }; } }, 'rules', () => now);
+  const monitor = new Monitor({ learn: async () => ({ learn_version: 'test-v1' }), account: async () => { calls++; return { balance_usdg: 100, open: [], closed: [] }; } }, 'rules', () => now);
   monitor.refresh(); await monitor.pending;
-  monitor.refresh(); assert.equal(calls, 1); assert.equal(monitor.harnessMatches, true);
+  monitor.refresh(); assert.equal(calls, 1); assert.equal(monitor.apiReady, true); assert.equal(monitor.learnVersion, 'test-v1');
   now = new Date('2026-10-08T16:01:00Z'); monitor.api.account = async () => { calls++; throw new Error('offline'); };
   monitor.refresh(); await monitor.pending;
   now = new Date('2026-10-08T16:02:00Z'); monitor.refresh();
-  assert.equal(calls, 2); assert.equal(monitor.error, 'offline'); assert.equal(monitor.account.balance_usdg, 100);
+  assert.equal(calls, 2); assert.equal(monitor.error, 'offline'); assert.equal(monitor.apiReady, false); assert.equal(monitor.account.balance_usdg, 100);
 });
 
 test('snapshot selects known IDs and never serializes secrets or raw account data', () => {

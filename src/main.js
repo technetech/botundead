@@ -42,7 +42,7 @@ try {
     if (command === 'check') {
       const result = await bot.check();
       log('connection_check', result);
-      if (!result.harnessMatches || !result.symbolsAvailable || result.balance < 75) process.exitCode = 1;
+      if (!result.apiReady || !result.symbolsAvailable || result.balance < 75) process.exitCode = 1;
     } else {
       unlock = store.lock();
       // Cargar de nuevo bajo el lock para excluir cambios de otra instancia.
