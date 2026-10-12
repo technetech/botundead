@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Api } from './api.js';
+import { Api, Heartbeat } from './api.js';
 import { Bot, STRATEGY } from './bot.js';
 import { Store } from './store.js';
 import { Monitor, createDashboard, snapshot } from './dashboard.js';
@@ -55,7 +55,9 @@ try {
       log('dashboard_started', { port: server.address().port, protected: Boolean(process.env.DASHBOARD_PASSWORD?.length >= 12) });
       log('started', { mode, strategy: STRATEGY, paused: bot.state.paused });
       let heartbeat = 0;
+      const apiHeartbeat = new Heartbeat(bot.api, log);
       while (!stopping) {
+        await apiHeartbeat.tick();
         await bot.tick();
         monitor.refresh();
         if (Date.now() >= heartbeat) {

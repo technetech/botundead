@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Api } from '../src/api.js';
+import { Api, Heartbeat } from '../src/api.js';
 import { Bot } from '../src/bot.js';
 import { initialState } from '../src/store.js';
 
-test('API 1.4 learns before sending scheduled orders; never requests legacy harness', async () => {
+test('API 1.10 learns before sending scheduled orders; never requests legacy harness', async () => {
   const paths = [];
   const api = new Api('test-key', async (url, options) => {
     const path = new URL(url).pathname.split('/').at(-1);
     paths.push(path);
     assert.equal(options.headers['X-Api-Key'], 'test-key');
     let data;
-    if (path === 'learn') data = { ok: true, learn_version: 'current-version', version: '1.4' };
+    if (path === 'learn') data = { ok: true, learn_version: 'current-version', version: '1.10' };
     else if (path === 'account') data = { ok: true, balance_usdg: 1000, open: [], closed: [] };
     else if (path === 'assets') data = { ok: true, assets: ['BTC', 'ETH', 'SOL'].map(symbol => ({ symbol, price_usd: 100 })) };
     else if (path === 'open') {
@@ -28,6 +28,42 @@ test('API 1.4 learns before sending scheduled orders; never requests legacy harn
   await bot.tick();
   assert.equal(saved.paused, null);
   assert.deepEqual(paths, ['learn', 'account', 'assets', 'open', 'open', 'open']);
+});
+
+test('API heartbeat is POST without body and does not require learn', async () => {
+  const api = new Api('test-key', async (url, options) => {
+    assert.equal(new URL(url).pathname, '/api/trading/agent/heartbeat');
+    assert.equal(options.method, 'POST');
+    assert.equal(options.headers['X-Api-Key'], 'test-key');
+    assert.equal(options.body, undefined);
+    assert.equal(options.headers['Content-Type'], undefined);
+    return Response.json({ ok: true, live: true, every_s: 60, live_window_s: 180 });
+  });
+  assert.equal((await api.heartbeat()).live, true);
+});
+
+test('heartbeat sends immediately and every 60 seconds, recovering after failure', async () => {
+  let now = 1000;
+  let calls = 0;
+  const events = [];
+  const heartbeat = new Heartbeat({ heartbeat: async () => {
+    calls++;
+    if (calls === 2) throw new Error('offline');
+    return { ok: true, live: true };
+  } }, (event, detail) => events.push({ event, ...detail }), () => now);
+  await heartbeat.tick();
+  now += 59999;
+  await heartbeat.tick();
+  assert.equal(calls, 1);
+  now++;
+  await heartbeat.tick();
+  assert.equal(events[1].event, 'api_heartbeat_error');
+  await heartbeat.tick();
+  assert.equal(calls, 2);
+  now += 60000;
+  await heartbeat.tick();
+  assert.equal(calls, 3);
+  assert.equal(events[2].event, 'api_heartbeat');
 });
 
 test('learn rejects missing version and surfaces authentication rejection', async () => {

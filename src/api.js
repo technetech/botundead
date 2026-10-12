@@ -13,13 +13,13 @@ export class Api {
     this.fetch = fetchImpl;
   }
 
-  async request(path, body) {
+  async request(path, body, method = body === undefined ? 'GET' : 'POST') {
     const mutation = body !== undefined;
     let response;
     let data;
     try {
       response = await this.fetch(`${BASE}${path}`, {
-        method: mutation ? 'POST' : 'GET',
+        method,
         headers: { 'X-Api-Key': this.key, ...(mutation ? { 'Content-Type': 'application/json' } : {}) },
         ...(mutation ? { body: JSON.stringify(body) } : {}),
         signal: AbortSignal.timeout(15000),
@@ -49,7 +49,29 @@ export class Api {
     return data;
   }
   assets() { return this.request('/assets'); }
+  heartbeat() { return this.request('/heartbeat', undefined, 'POST'); }
   account() { return this.request('/account'); }
   open(body) { return this.request('/open', body); }
   close(body) { return this.request('/close', body); }
+}
+
+// El latido no envia ordenes: un fallo no debe bloquear cierres ni pausar el bot.
+export class Heartbeat {
+  constructor(api, log = () => {}, now = () => Date.now()) {
+    this.api = api;
+    this.log = log;
+    this.now = now;
+    this.nextBeat = 0;
+  }
+
+  async tick() {
+    if (this.now() < this.nextBeat) return;
+    this.nextBeat = this.now() + 60000;
+    try {
+      await this.api.heartbeat();
+      this.log('api_heartbeat', { live: true });
+    } catch (error) {
+      this.log('api_heartbeat_error', { reason: error.message });
+    }
+  }
 }
