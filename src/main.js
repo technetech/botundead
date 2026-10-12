@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Api, Heartbeat } from './api.js';
+import { Api, Heartbeat, VersionMonitor } from './api.js';
 import { Bot, STRATEGY } from './bot.js';
 import { Store } from './store.js';
 import { Monitor, createDashboard, snapshot } from './dashboard.js';
@@ -16,6 +16,7 @@ const log = (event, detail = {}) => {
 let unlock;
 let server;
 let monitor;
+let versionMonitor;
 let stopping = false;
 try {
   const mode = process.env.BOT_MODE || 'dry-run';
@@ -56,7 +57,9 @@ try {
       log('started', { mode, strategy: STRATEGY, paused: bot.state.paused });
       let heartbeat = 0;
       const apiHeartbeat = new Heartbeat(bot.api, log);
+      versionMonitor = new VersionMonitor(bot.api, log);
       while (!stopping) {
+        versionMonitor.refresh();
         await apiHeartbeat.tick();
         await bot.tick();
         monitor.refresh();
@@ -75,5 +78,6 @@ try {
 } finally {
   if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
   if (monitor?.pending) await monitor.pending;
+  if (versionMonitor?.pending) await versionMonitor.pending;
   if (unlock) unlock();
 }

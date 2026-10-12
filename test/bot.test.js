@@ -143,7 +143,7 @@ test('API sends documented headers and bodies; network errors never retry', asyn
   let calls = 0;
   const api = new Api('test-key', async (url, options) => {
     calls++;
-    assert.equal(options.headers['X-Api-Key'], 'test-key');
+    assert.equal(options.headers['X-Asset-Key'], 'test-key');
     assert.equal(options.redirect, 'error');
     assert.equal(JSON.parse(options.body).symbol, 'BTC');
     throw new Error('network');

@@ -28,7 +28,7 @@ El navegador actualiza la vista cada 5 segundos desde la memoria del servidor; e
 
 ### Actualizar un despliegue existente
 
-1. Desplegar la integracion API 1.10: usa `/learn` y envia `POST /heartbeat` sin body cada 60 segundos desde el arranque. `harness.md` describe la estrategia local; no hay que copiarlo al proveedor.
+1. Desplegar la integracion API 1.13: usa `/learn` y envia `POST /heartbeat` sin body cada 60 segundos desde el arranque. `harness.md` describe la estrategia local; no hay que copiarlo al proveedor.
 2. Agregar `DASHBOARD_PASSWORD` en las variables de Railway. Mantener `UNDEAD_API_KEY`, `DATA_DIR=/data` y el volumen existente. Para ejecutar ordenes virtuales, usar `BOT_MODE=live`.
 3. Desplegar la nueva version antes del siguiente ciclo. En Settings → Networking → Public Networking, usar **Generate Domain** y el puerto HTTP del servicio (`PORT`, o 3000 si no esta definido). Entrar al dominio HTTPS con usuario `admin` y la contrasena elegida. Ver [red publica de Railway](https://docs.railway.com/networking/public-networking). El healthcheck `/health` solo indica que el proceso HTTP responde; el panel muestra por separado pausas, modo y errores de cuenta.
 4. Ejecutar `node src/main.js check` en el servicio y verificar `apiReady: true`, `learnVersion`, saldo y activos disponibles. Verificar que el panel muestre datos de cuenta actualizados y modo Automatico. Un deploy saludable solo demuestra que el servidor arranco, no que se hayan enviado ordenes. Si hay una pausa persistida, resolverla con el procedimiento de recuperacion de abajo; un redeploy no borra pausas.
@@ -48,7 +48,7 @@ Copy-Item .env.example .env
 
 Editar `.env` localmente y poner **solo** la API key de Undeadwallet en `UNDEAD_API_KEY`. `.env` y `data/` estan excluidos de Git y de la imagen Docker. No pegar claves en el chat ni en GitHub.
 
-Antes de abrir o cerrar, el bot consulta `/learn` y exige una `learn_version` no vacia. Segun el contrato API 1.10, esa lectura marca la API key con la version vigente; sin ella el proveedor rechaza ordenes con HTTP 428. No se agrega un campo de version a las ordenes porque el contrato publicado no lo exige. `harness.md` es una descripcion local; la estrategia se ejecuta en el codigo y no se reprograma interpretando texto del proveedor.
+Antes de abrir o cerrar, el bot consulta `/learn` y exige una `learn_version` no vacia. Segun el contrato API 1.13, esa lectura marca la API key con la version vigente; sin ella el proveedor rechaza ordenes con HTTP 428. No se agrega un campo de version a las ordenes porque el contrato publicado no lo exige. `harness.md` es una descripcion local; la estrategia se ejecuta en el codigo y no se reprograma interpretando texto del proveedor.
 
 ```powershell
 npm.cmd run check
@@ -78,7 +78,7 @@ Antes de cada POST se guarda su intencion. Un timeout, JSON invalido o respuesta
 
 El proceso consulta el reloj cada 5 segundos, emite heartbeat cada 5 minutos y consulta la API cuando hay una accion debida y cada 60 segundos para el panel. No hay bucles de reintento tras errores de autenticacion, saldo, precio o limite de solicitudes.
 
-Ademas del heartbeat local de logs, envia `POST /heartbeat` sin body al proveedor al arrancar y cada 60 segundos, tambien en dry-run o si la operativa esta pausada. La API 1.10 muestra el bot apagado cuando no recibe latidos durante 180 segundos. Los eventos `api_heartbeat` y `api_heartbeat_error` indican el resultado; un fallo se registra y se vuelve a intentar en el siguiente intervalo sin pausar las ordenes ni bloquear los cierres. No se envia desde el comando `check`. El OpenAPI no documenta que la falta de latido rechace ordenes, por lo que el indicador apagado no confirma por si solo la causa de una interrupcion de operativa.
+Ademas del heartbeat local de logs, envia `POST /heartbeat` sin body al proveedor al arrancar y cada 60 segundos, tambien en dry-run o si la operativa esta pausada. La API 1.13 muestra el bot apagado cuando no recibe latidos durante 180 segundos. Los eventos `api_heartbeat` y `api_heartbeat_error` indican el resultado; un fallo se registra y se vuelve a intentar en el siguiente intervalo sin pausar las ordenes ni bloquear los cierres. No se envia desde el comando `check`. El OpenAPI no documenta que la falta de latido rechace ordenes, por lo que el indicador apagado no confirma por si solo la causa de una interrupcion de operativa.
 
 ### Recuperacion
 
@@ -93,4 +93,6 @@ Ademas del heartbeat local de logs, envia `POST /heartbeat` sin body al proveedo
 
 `npm test` usa una API simulada y verifica ciclos, medianoche, compatibilidad de posiciones antiguas, tamanos, cierres propios, reinicios, entradas tardias, timeout, rechazos, dry-run y almacenamiento. Tambien prueba el servidor HTTP local, autenticacion, seleccion de datos y cache del panel. No requiere key ni conexion externa. GitHub Actions ejecuta pruebas y comprobaciones de sintaxis en cada push/PR.
 
-Contrato actualizado a partir del [OpenAPI](https://undeadwallet.com/api/trading/agent/docsapi), version 1.10, consultado el 12 de octubre de 2026. Mantiene /learn, /assets, /account, /open y /close; agrega /heartbeat, /candles exclusivo premium y key_account en /account. El bot conserva las consultas gratuitas y no requiere premium. Falta validar con la key del despliegue: no hay una key ni estado de operativa local para diagnosticar la interrupcion real. Una pausa persistida requiere el procedimiento de recuperacion; actualizar el codigo no la elimina.
+Contrato actualizado a partir del [OpenAPI](https://undeadwallet.com/api/trading/agent/docsapi), version 1.13, consultado el 12 de octubre de 2026. Mantiene /learn, /assets, /account, /open y /close; agrega /heartbeat, /candles exclusivo premium y key_account en /account. El bot conserva las consultas gratuitas y no requiere premium. Falta validar con la key del despliegue: no hay una key ni estado de operativa local para diagnosticar la interrupcion real. Una pausa persistida requiere el procedimiento de recuperacion; actualizar el codigo no la elimina.
+
+La API 1.13 exige el encabezado X-Asset-Key (la variable UNDEAD_API_KEY conserva su nombre). El servicio ejecuta un job independiente al arrancar y cada 15 minutos: GET /version y GET /learn solo cuando must_relearn es true. Registra api_version cuando cambia learn_version o debe reaprender, y api_version_error si falla; vuelve a consultar en el siguiente intervalo sin enviar ordenes. Este job funciona con el proceso continuo de Railway, sin otro servicio cron ni otra copia del bot. Los cambios de contrato que requieran modificar codigo no se resuelven solo releyendo /learn. Se conservan las lecturas de /learn previas a ordenes y las del panel.

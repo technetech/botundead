@@ -20,7 +20,7 @@ export class Api {
     try {
       response = await this.fetch(`${BASE}${path}`, {
         method,
-        headers: { 'X-Api-Key': this.key, ...(mutation ? { 'Content-Type': 'application/json' } : {}) },
+        headers: { 'X-Asset-Key': this.key, ...(mutation ? { 'Content-Type': 'application/json' } : {}) },
         ...(mutation ? { body: JSON.stringify(body) } : {}),
         signal: AbortSignal.timeout(15000),
         redirect: 'error',
@@ -49,10 +49,48 @@ export class Api {
     return data;
   }
   assets() { return this.request('/assets'); }
+  async version() {
+    const data = await this.request('/version');
+    if (typeof data.version !== 'string' || !data.version.trim()
+        || typeof data.learn_version !== 'string' || !data.learn_version.trim()
+        || typeof data.must_relearn !== 'boolean') {
+      throw new ApiError('/version: contrato inesperado');
+    }
+    return data;
+  }
   heartbeat() { return this.request('/heartbeat', undefined, 'POST'); }
   account() { return this.request('/account'); }
   open(body) { return this.request('/open', body); }
   close(body) { return this.request('/close', body); }
+}
+
+// Job independiente de la operativa; nunca envia ni reintenta ordenes.
+export class VersionMonitor {
+  constructor(api, log = () => {}, now = () => Date.now()) {
+    this.api = api;
+    this.log = log;
+    this.now = now;
+    this.nextRead = 0;
+    this.pending = null;
+    this.learnVersion = null;
+  }
+
+  refresh() {
+    if (this.pending || this.now() < this.nextRead) return;
+    this.nextRead = this.now() + 15 * 60000;
+    this.pending = (async () => {
+      try {
+        const data = await this.api.version();
+        if (data.must_relearn) await this.api.learn();
+        if (this.learnVersion !== data.learn_version || data.must_relearn) {
+          this.log('api_version', { version: data.version, learnVersion: data.learn_version, relearned: data.must_relearn });
+        }
+        this.learnVersion = data.learn_version;
+      } catch (error) {
+        this.log('api_version_error', { reason: error.message });
+      } finally { this.pending = null; }
+    })();
+  }
 }
 
 // El latido no envia ordenes: un fallo no debe bloquear cierres ni pausar el bot.
