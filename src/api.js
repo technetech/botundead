@@ -8,9 +8,13 @@ export class ApiError extends Error {
 }
 
 export class Api {
-  constructor(key, fetchImpl = fetch) {
+  constructor(key, fetchImpl = fetch, botId) {
+    if (botId !== undefined && (typeof botId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(botId))) {
+      throw new Error('Identificador del bot invalido; revisar DATA_DIR/bot-id sin cambiar la identidad de un bot activo');
+    }
     this.key = key;
     this.fetch = fetchImpl;
+    this.botId = botId;
   }
 
   async request(path, body, method = body === undefined ? 'GET' : 'POST') {
@@ -20,7 +24,7 @@ export class Api {
     try {
       response = await this.fetch(`${BASE}${path}`, {
         method,
-        headers: { 'X-Asset-Key': this.key, ...(mutation ? { 'Content-Type': 'application/json' } : {}) },
+        headers: { 'X-Asset-Key': this.key, ...(this.botId ? { 'X-Bot-Id': this.botId } : {}), ...(mutation ? { 'Content-Type': 'application/json' } : {}) },
         ...(mutation ? { body: JSON.stringify(body) } : {}),
         signal: AbortSignal.timeout(15000),
         redirect: 'error',

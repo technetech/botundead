@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 export function initialState() {
   return { version: 1, days: {}, positions: [], paused: null };
@@ -19,6 +20,25 @@ export class Store {
       throw new Error('Estado persistente invalido; revisar state.json antes de continuar');
     }
     return state;
+  }
+
+  botId() {
+    const file = path.join(this.directory, 'bot-id');
+    let fd;
+    try {
+      fd = fs.openSync(file, 'wx', 0o600);
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const id = fs.readFileSync(file, 'utf8').trim();
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new Error('DATA_DIR/bot-id invalido; revisar sin regenerar la identidad de un bot activo');
+      return id;
+    }
+    const id = randomUUID();
+    try {
+      fs.writeFileSync(fd, id);
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    return id;
   }
 
   save(state) {

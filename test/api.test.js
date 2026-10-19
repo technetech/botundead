@@ -4,6 +4,23 @@ import { Api, Heartbeat, VersionMonitor } from '../src/api.js';
 import { Bot } from '../src/bot.js';
 import { initialState } from '../src/store.js';
 
+test('API 1.17 sends the same bot identity on reads, heartbeat and orders; 409 is not retried', async () => {
+  let calls = 0;
+  const api = new Api('secret', async (url, options) => {
+    calls++;
+    assert.equal(options.headers['X-Bot-Id'], 'stable-bot-id');
+    assert.equal(options.headers['X-Asset-Key'], 'secret');
+    return Response.json({ ok: false, reason: 'key_in_use' }, { status: 409 });
+  }, 'stable-bot-id');
+  for (const action of [() => api.learn(), () => api.account(), () => api.assets(), () => api.version(), () => api.heartbeat(), () => api.open({}), () => api.close({ id: 1 })]) {
+    await assert.rejects(action(), error => /HTTP 409, key_in_use/.test(error.message) && error.uncertain === false);
+  }
+  assert.equal(calls, 7);
+  for (const id of ['', 'a'.repeat(65), 'bad\r\nheader', 123]) {
+    assert.throws(() => new Api('secret', fetch, id), /Identificador del bot invalido/);
+  }
+});
+
 test('API 1.13 learns before sending scheduled orders; never requests legacy harness', async () => {
   const paths = [];
   const api = new Api('test-key', async (url, options) => {

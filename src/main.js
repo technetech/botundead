@@ -39,7 +39,7 @@ try {
     const key = process.env.UNDEAD_API_KEY?.trim();
     if (!key) throw new Error('Falta UNDEAD_API_KEY. Configurar .env o las variables de Railway');
     const harness = fs.readFileSync(fileURLToPath(new URL('../harness.md', import.meta.url)), 'utf8');
-    const bot = new Bot({ api: new Api(key), store, harness, mode, log });
+    const bot = new Bot({ api: new Api(key, fetch, store.botId()), store, harness, mode, log });
     if (command === 'check') {
       const result = await bot.check();
       log('connection_check', result);
