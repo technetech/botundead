@@ -1,99 +1,213 @@
 # Undeadbot
 
-Bot de **paper trading** para Undeadwallet, en Node.js 22 y sin dependencias externas. El modo `live` ejecuta ordenes sobre saldo **virtual USDG**, segun la API de Undeadwallet. No usa claves privadas de wallets ni realiza transacciones on-chain.
+Panel privado de **1 a 10 agentes** de paper trading para Undeadwallet, con estrategia, conexión API, posiciones y actividad persistentes por agente. Conserva la interfaz oscura y verde original. Requiere Node.js 22 o posterior.
 
-## Estrategia
+Cada instalación tiene sus propios datos: clonar el repositorio crea un espacio inicial vacío, no copia cuentas, claves ni el historial privado de otra instalación. Los nuevos agentes empiezan desactivados y en `dry-run`. No hace falta una API key para abrir el panel y preparar agentes.
 
-| Parametro | Valor |
-| --- | --- |
-| Activos | BTC, ETH, SOL |
-| Direccion | Long |
-| Margen | 25 USDG por activo; 75 USDG total |
-| Apalancamiento | 10x; exposicion inicial total de 750 USDG |
-| Apertura | Cada dos horas: 00:25, 02:25, ..., 10:25, 12:25, ..., 22:25 |
-| Cierre | 90 minutos despues: 01:55, 03:55, ..., 11:55, 13:55, ..., 23:55 |
-| Zona | America/Monterrey, independiente del reloj del servidor |
+## Guías de despliegue
 
-El proceso debe estar activo **antes** del inicio del ciclo. Tiene una ventana de 60 segundos para enviar las entradas, en secuencia. Un arranque a las 10:25 o despues omite ese ciclo y espera al de las 12:25. Funciona las 24 horas, incluidos fines de semana. No repite un ciclo parcialmente ejecutado. Si vuelve a arrancar despues del cierre, cierra las posiciones propias pendientes, salvo que haya una pausa por error que requiera revision. No abre nuevas posiciones mientras queden propias abiertas. La cuenta puede contener posiciones manuales: no las modifica.
+- [Local: Node.js o aplicación y PostgreSQL con Docker](#guía-1-despliegue-local).
+- [Railway: actualizar nuestro servicio actual o crear uno nuevo](#guía-2-despliegue-en-railway).
+- [Vercel: PostgreSQL y ejecución programada](#guía-3-despliegue-en-vercel).
 
-Las posiciones ya abiertas conservan su `closeSeconds` registrado, incluso si pertenecen al horario anterior de :10 a :50. Las posiciones diarias antiguas sin ese campo conservan su cierre original a las 17:55. Sus IDs y registros no se eliminan. Las nuevas entradas se identifican por fecha y hora, por ejemplo `2026-10-08T10:25`.
+**Nuestro despliegue actual está en Railway.** Para esta actualización, conservar el servicio, sus variables y el volumen existente. Las otras guías permiten crear instalaciones independientes; no implican trasladar el bot actual.
 
-## Panel web
 
-El mismo servicio sirve un panel privado, adaptable a movil, con saldo y patrimonio de la cuenta, posiciones propias, PnL disponible, actividad desde el reinicio, reloj de Monterrey, agenda y proxima apertura. Es de solo lectura: no permite enviar ordenes. Los registros de posiciones persisten; los eventos recientes son de la sesion actual.
+## Guía 1: despliegue local
 
-Configurar `DASHBOARD_PASSWORD` con una contrasena nueva de al menos 12 caracteres. El usuario es **admin**. La contrasena del panel es independiente de `UNDEAD_API_KEY`; ninguna se envia en las respuestas del panel. Sin contrasena valida, el servidor solo muestra instrucciones de configuracion y no revela el estado de la cuenta. En local abrir `http://localhost:3000`; en Railway usar el dominio HTTPS del servicio.
+Requisitos: Git y Node.js 22 o posterior. Docker solo es necesario si eliges la opción con PostgreSQL.
 
-El navegador actualiza la vista cada 5 segundos desde la memoria del servidor; el servidor consulta la cuenta y /learn cada 60 segundos independientemente del numero de visitantes. Los precios y PnL son la ultima lectura, no un feed en tiempo real. Si una lectura falla, el panel muestra el error, conserva la fecha de la ultima lectura y no vuelve a consultar automaticamente hasta reiniciar. Un fallo del monitor no envia ordenes ni pausa por si mismo el motor de operaciones.
+### Opción A: Node.js y almacenamiento local automático
 
-### Actualizar un despliegue existente
-
-1. Desplegar la integracion API 1.13: usa `/learn` y envia `POST /heartbeat` sin body cada 60 segundos desde el arranque. `harness.md` describe la estrategia local; no hay que copiarlo al proveedor.
-2. Agregar `DASHBOARD_PASSWORD` en las variables de Railway. Mantener `UNDEAD_API_KEY`, `DATA_DIR=/data` y el volumen existente. Para ejecutar ordenes virtuales, usar `BOT_MODE=live`.
-3. Desplegar la nueva version antes del siguiente ciclo. En Settings → Networking → Public Networking, usar **Generate Domain** y el puerto HTTP del servicio (`PORT`, o 3000 si no esta definido). Entrar al dominio HTTPS con usuario `admin` y la contrasena elegida. Ver [red publica de Railway](https://docs.railway.com/networking/public-networking). El healthcheck `/health` solo indica que el proceso HTTP responde; el panel muestra por separado pausas, modo y errores de cuenta.
-4. Ejecutar `node src/main.js check` en el servicio y verificar `apiReady: true`, `learnVersion`, saldo y activos disponibles. Verificar que el panel muestre datos de cuenta actualizados y modo Automatico. Un deploy saludable solo demuestra que el servidor arranco, no que se hayan enviado ordenes. Si hay una pausa persistida, resolverla con el procedimiento de recuperacion de abajo; un redeploy no borra pausas.
-
-No hay stop-loss ni take-profit. El servidor determina precios y liquidaciones; los precios tienen cache de 240 segundos y el servidor rechaza precios demasiado antiguos. El bot no garantiza ejecucion al segundo exacto ni cierre durante interrupciones. La estrategia no implica rentabilidad.
-
-## Probar en local
-
-Requiere Node.js 22. No es necesario instalar paquetes externos.
+En Windows / PowerShell, desde la carpeta donde quieras descargar el proyecto:
 
 ```powershell
+git clone https://github.com/technetech/botundead.git
+Set-Location botundead
 npm.cmd ci
-npm.cmd test
-npm.cmd run lint
 Copy-Item .env.example .env
 ```
 
-Editar `.env` localmente y poner **solo** la API key de Undeadwallet en `UNDEAD_API_KEY`. `.env` y `data/` estan excluidos de Git y de la imagen Docker. No pegar claves en el chat ni en GitHub.
+En macOS / Linux:
 
-Antes de abrir o cerrar, el bot consulta `/learn` y exige una `learn_version` no vacia. Segun el contrato API 1.13, esa lectura marca la API key con la version vigente; sin ella el proveedor rechaza ordenes con HTTP 428. No se agrega un campo de version a las ordenes porque el contrato publicado no lo exige. `harness.md` es una descripcion local; la estrategia se ejecuta en el codigo y no se reprograma interpretando texto del proveedor.
-
-```powershell
-npm.cmd run check
-npm.cmd start
+```sh
+git clone https://github.com/technetech/botundead.git
+cd botundead
+npm ci
+cp .env.example .env
 ```
 
-`check` hace solo tres lecturas: /learn, cuenta y activos; muestra `apiReady`, `learnVersion`, saldo y disponibilidad de simbolos. No muestra la clave ni abre posiciones. Devuelve error si no estan las condiciones iniciales. El contrato autenticado todavia debe validarse con una key real; la documentacion publica ofrece ejemplos pero no un esquema completo de posiciones.
+1. Editar `.env` y configurar `DASHBOARD_PASSWORD` con al menos 12 caracteres. Mantener `DATA_DIR=./data` y dejar `DATABASE_URL` vacío para usar almacenamiento local. No hace falta una API key para iniciar el panel.
+2. Ejecutar `npm.cmd start` en PowerShell o `npm start` en macOS / Linux. Mantener ese proceso activo para ejecutar las estrategias; cerrar la terminal detiene el motor.
+3. Abrir [http://localhost:3000](http://localhost:3000). Entrar con usuario **admin** y la contraseña elegida.
+4. Abrir la primera tarjeta o crear otro agente. En **Conexiones API**, guardar una clave de Undeadwallet, o configurar `AGENT_N_UNDEAD_API_KEY` en `.env` y reiniciar. En **Estrategia**, guardar los parámetros y activar el agente. Probar primero en modo **Prueba**.
+5. Confirmar en **Resumen e historial** que la cuenta tiene una fecha de consulta y no hay errores. El siguiente ciclo solo puede ejecutarse si el motor ya estaba activo antes de su apertura.
 
-`BOT_MODE=dry-run` es el valor inicial: consulta y muestra decisiones a la hora programada, **sin enviar ninguna orden**. No simula ganancias ni crea posiciones ficticias. Para ejecutar sobre el saldo virtual, cambiar a `BOT_MODE=live` y reiniciar. No existe un comando de apertura inmediata: las entradas respetan el horario.
+El almacenamiento se crea automáticamente en `DATA_DIR`. No hay que instalar un servidor de base de datos para esta opción: `data/workspace.json` contiene agentes, identidades, posiciones, pausas, conexiones cifradas e historial. `data/credentials.key` guarda la clave de cifrado local cuando no se configura `CREDENTIALS_KEY`. Respaldar ambos y conservar `data/` al actualizar.
 
-## GitHub y Railway
+**Para probar mientras nuestro bot sigue en Railway**, dejar los agentes locales desactivados o usar otras API keys. No activar la misma cuenta simultáneamente en local y Railway con almacenamientos separados.
 
-1. Crear un repositorio **vacio** en GitHub. Se puede usar privado. Desde esta carpeta: `git init`, `git add .`, `git commit -m "Initial Undeadbot implementation"`, `git branch -M main`, `git remote add origin URL_DEL_REPOSITORIO`, `git push -u origin main`. Revisar antes `git status` para confirmar que no se incluye `.env` ni `data/`.
-2. Crear en Railway un servicio desde ese repositorio. El `Dockerfile` define el proceso; `railway.json` define el despliegue. El panel escucha en `PORT` (3000 por defecto). Generar un dominio HTTPS para acceder al panel. No necesita cron externo.
-3. Agregar un **volumen persistente** montado en `/data`. Configurar `DATA_DIR=/data`. Sin volumen, perder los IDs puede dejar posiciones sin gestionar o permitir duplicados tras redeploys.
-4. Configurar `UNDEAD_API_KEY`, `DASHBOARD_PASSWORD` y comenzar con `BOT_MODE=dry-run`. Mantener **una sola replica**, sin suspension/serverless. No ejecutar al mismo tiempo otra copia local ni otro servicio con la misma key.
-5. Ejecutar `node src/main.js check` en el entorno del servicio, o hacer la comprobacion en local antes del despliegue. Revisar los logs de inicio y heartbeat. No se usa el antiguo campo Harness remoto.
-6. Cuando la comprobacion autenticada sea correcta, cambiar `BOT_MODE=live` y desplegar **antes del siguiente ciclo de Monterrey**. Por ejemplo, a las 10:25 revisar tres eventos `opened`; a las 11:55, tres `closed`.
+### Opción B: aplicación y PostgreSQL con Docker Compose
 
-Los nombres de opciones de Railway pueden cambiar; los requisitos son un proceso continuo, un volumen y una sola instancia. Se configuran 120 segundos de margen para finalizar solicitudes y liberar el lock durante un despliegue. Referencias: [configuracion como codigo](https://docs.railway.com/config-as-code/reference), [volumenes](https://docs.railway.com/volumes) y [Serverless](https://docs.railway.com/deployments/serverless). No esta desplegado ni conectado a una cuenta por el hecho de subirlo a GitHub.
+1. Clonar el repositorio y copiar `.env.example` a `.env` como en la opción anterior.
+2. Configurar `DASHBOARD_PASSWORD`, `POSTGRES_PASSWORD` (alfanumérica, nueva y aleatoria) y `CREDENTIALS_KEY` en `.env`. Generar esta última con:
 
-## Persistencia y errores
+```sh
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
 
-`DATA_DIR/state.json` guarda fechas, intenciones de apertura y los IDs confirmados. Se escribe con fsync y reemplazo atomico. No borrar ni sustituir este archivo mientras existan posiciones del bot. Mantener copia de respaldo del volumen.
+3. Levantar aplicación y base de datos:
 
-Antes de cada POST se guarda su intencion. Un timeout, JSON invalido o respuesta inesperada deja la orden como incierta. **No se reenvia automaticamente.** Un error pausa el bot de forma persistente, incluidos los cierres; los logs indican `paused` y los heartbeats repiten el motivo. No hay alertas por correo o Telegram en esta version: vigilar los logs y el panel. Si queda una posicion abierta durante una pausa, cerrarla manualmente o resolver la pausa antes del cierre programado.
+```sh
+docker compose up --build -d
+docker compose logs -f app
+```
 
-El proceso consulta el reloj cada 5 segundos, emite heartbeat cada 5 minutos y consulta la API cuando hay una accion debida y cada 60 segundos para el panel. No hay bucles de reintento tras errores de autenticacion, saldo, precio o limite de solicitudes.
+4. Abrir [http://localhost:3000](http://localhost:3000) y configurar los agentes como en la opción A. Compose espera a que PostgreSQL esté disponible y crea automáticamente la tabla y el primer agente.
+5. Para detener los servicios conservando el historial, usar `docker compose down`. Para actualizar, descargar los cambios y ejecutar otra vez `docker compose up --build -d`.
 
-Ademas del heartbeat local de logs, envia `POST /heartbeat` sin body al proveedor al arrancar y cada 60 segundos, tambien en dry-run o si la operativa esta pausada. La API 1.13 muestra el bot apagado cuando no recibe latidos durante 180 segundos. Los eventos `api_heartbeat` y `api_heartbeat_error` indican el resultado; un fallo se registra y se vuelve a intentar en el siguiente intervalo sin pausar las ordenes ni bloquear los cierres. No se envia desde el comando `check`. El OpenAPI no documenta que la falta de latido rechace ordenes, por lo que el indicador apagado no confirma por si solo la causa de una interrupcion de operativa.
+El volumen `postgres-data` conserva PostgreSQL entre reinicios. **No usar `docker compose down -v` si se quiere conservar el historial.** Para una migración desde almacenamiento local, conservar también `./data` y su misma clave de cifrado; ver [Actualizar la instalación anterior](#actualizar-la-instalación-anterior).
 
-### Recuperacion
 
-1. Detener la instancia. Revisar el motivo en logs y el estado con `npm run status` (en Docker, `node src/main.js status`). Comparar con el panel Undeadwallet y las notas `undeadbot:FECHAT10:25:SIMBOLO:long` (o las notas diarias antiguas).
-2. Para una apertura `pending`, identificar la operacion real de forma inequivoca. Si existe, conservar su ID en el registro del ciclo con `status: "opened"` e `id`, y agregar a `positions` un objeto como `{ "id": ID, "symbol": "BTC", "day": "2026-10-08", "cycle": "2026-10-08T10:25", "closeSeconds": 42900, "margin": 25, "leverage": 10, "status": "open" }`, adaptado a su fecha, activo y horario real. `closeSeconds` son segundos desde medianoche local (11:55 = 42900). Para posiciones diarias heredadas conservar el formato antiguo. Si ya esta cerrada usar `status: "closed"`. Si se confirma que nunca se abrio, cambiar la entrada del ciclo a `status: "rejected"`. **No borrar el ciclo**. No inferir propiedad solo por simbolo o monto: podria ser una posicion manual. Si no hay certeza, dejar pausado y revisar con el proveedor.
-3. Para una posicion `closing`, verificar la cuenta. Si ya cerro, usar `status: "closed"`; si sigue abierta y se confirma que el cierre no se ejecuto, usar `status: "open"`. Conservar todos los IDs y hacer respaldo antes de editar.
-4. Corregir la causa del error. Ejecutar `npm run resume` (o `node src/main.js resume`) con el bot detenido. Solo elimina la pausa; se niega si quedan ordenes inciertas. Reiniciar. Las entradas de un ciclo ya registrado no se vuelven a intentar; los cierres vencidos se procesan.
+## Guía 2: despliegue en Railway
 
-`process.lock` excluye dos procesos que compartan el volumen. Se elimina al detener normalmente el proceso. Si hubo un apagado forzado puede quedar un lock huerfano: **verificar que no quede ninguna instancia activa** antes de borrar exclusivamente `DATA_DIR/process.lock`. Nunca borrar `state.json` para solucionar un lock. Ante un crash, Railway puede intentar reiniciar hasta tres veces; un lock huerfano exige esta recuperacion manual. El lock no coordina servicios con volumenes distintos.
+**Railway es nuestro despliegue actual.** Para actualizarlo, usar el servicio y el volumen existentes; no crear otro bot con la misma API key. La nueva interfaz no obliga a cambiar a PostgreSQL.
 
-## Validacion
+### Actualizar nuestro servicio existente sin perder el historial
 
-`npm test` usa una API simulada y verifica ciclos, medianoche, compatibilidad de posiciones antiguas, tamanos, cierres propios, reinicios, entradas tardias, timeout, rechazos, dry-run y almacenamiento. Tambien prueba el servidor HTTP local, autenticacion, seleccion de datos y cache del panel. No requiere key ni conexion externa. GitHub Actions ejecuta pruebas y comprobaciones de sintaxis en cada push/PR.
+1. Antes del despliegue, hacer un respaldo del volumen y verificar que `DATA_DIR=/data` apunta al volumen persistente actual. Conservar `state.json`, `bot-id` y, si ya existen, `workspace.json` y `credentials.key`. No cambiar identidades ni eliminar pausas para actualizar la interfaz.
+2. Mantener `UNDEAD_API_KEY`, `DASHBOARD_PASSWORD` y `BOT_MODE` con sus valores actuales. El primer agente reconoce la variable heredada `UNDEAD_API_KEY`. Conservar una sola réplica y la ejecución continua, sin suspensión.
+3. Subir esta versión a la rama conectada al servicio. Si Railway tiene despliegues automáticos, el push inicia un deploy; si están desactivados, desplegar el último commit desde el servicio. Verificar que termine el proceso anterior antes de que arranque el nuevo; `railway.json` conserva `overlapSeconds=0` y el margen de cierre.
+4. Al primer arranque, si todavía no existe un workspace, el código importa `/data/state.json` y `/data/bot-id` al **Agente principal**, conservando posiciones, ciclos, IDs y pausas. El modo se importa desde `BOT_MODE`. El archivo antiguo queda como respaldo; el estado vigente pasa a `/data/workspace.json`.
+5. Entrar al **mismo dominio de Railway** con usuario `admin` y la contraseña actual. Verificar la primera tarjeta, el modo del agente, los IDs de posiciones y el historial importado. Una pausa previa seguirá visible y debe conciliarse; actualizar no la elimina.
+6. Abrir **Conexiones API** y confirmar que el origen es **Variable de entorno**. Para el segundo agente y siguientes, usar claves independientes desde el panel o `AGENT_2_UNDEAD_API_KEY`, …, `AGENT_10_UNDEAD_API_KEY`. Los agentes nuevos empiezan desactivados y en prueba.
+7. Revisar los logs de inicio, la fecha de la última consulta y el próximo ciclo. `/health` solo confirma que responde el proceso HTTP; no demuestra que la API esté conectada ni que se hayan enviado órdenes. Mantener los respaldos y conservar el volumen en los próximos deploys.
 
-Contrato actualizado a partir del [OpenAPI](https://undeadwallet.com/api/trading/agent/docsapi), version 1.13, consultado el 12 de octubre de 2026. Mantiene /learn, /assets, /account, /open y /close; agrega /heartbeat, /candles exclusivo premium y key_account en /account. El bot conserva las consultas gratuitas y no requiere premium. Falta validar con la key del despliegue: no hay una key ni estado de operativa local para diagnosticar la interrupcion real. Una pausa persistida requiere el procedimiento de recuperacion; actualizar el codigo no la elimina.
+Si se usa almacenamiento por archivos y se guardan claves desde el panel, el cifrado local se genera en `/data/credentials.key`. Respaldarlo junto con el workspace. No añadir `DATABASE_URL` durante una actualización normal: cambiar de almacenamiento debe hacerse con una migración planificada.
 
-La API 1.13 exige el encabezado X-Asset-Key (la variable UNDEAD_API_KEY conserva su nombre). El servicio ejecuta un job independiente al arrancar y cada 15 minutos: GET /version y GET /learn solo cuando must_relearn es true. Registra api_version cuando cambia learn_version o debe reaprender, y api_version_error si falla; vuelve a consultar en el siguiente intervalo sin enviar ordenes. Este job funciona con el proceso continuo de Railway, sin otro servicio cron ni otra copia del bot. Los cambios de contrato que requieran modificar codigo no se resuelven solo releyendo /learn. Se conservan las lecturas de /learn previas a ordenes y las del panel.
-Actualizacion API 1.17 (19 de octubre de 2026): todas las solicitudes del proceso y del comando check envian X-Bot-Id. Se genera una sola vez un UUID en DATA_DIR/bot-id y se reutiliza tras reinicios; conservar este archivo junto con el volumen y sus respaldos. No modifica state.json ni elimina pausas. Si el archivo existe pero es invalido, el arranque falla en lugar de cambiar de identidad. El proveedor documenta 409 key_in_use cuando otra identidad usa la misma key; detener la otra instancia y revisar con el proveedor si persiste. No regenerar bot-id para eludir el conflicto ni ejecutar check desde otra maquina o volumen con la misma key de un bot activo. La identidad estable no sustituye el requisito de una sola instancia. /version, /heartbeat y los formatos de ordenes se conservan. No se ha probado contra una cuenta autenticada.
+### Crear una instalación nueva en Railway
+
+1. Crear un proyecto/servicio conectado a [este repositorio](https://github.com/technetech/botundead). El `Dockerfile` instala las dependencias y `railway.json` configura el arranque y el healthcheck `/health`.
+2. Elegir **una** opción de persistencia:
+   - **Volumen**: montar un volumen persistente en `/data`, configurar `DATA_DIR=/data` y dejar `DATABASE_URL` sin definir. El almacenamiento se crea dentro de ese volumen.
+   - **PostgreSQL**: agregar PostgreSQL al proyecto y configurar en la app `DATABASE_URL=${{Postgres.DATABASE_URL}}`, sustituyendo `Postgres` por el nombre real del servicio de base de datos. Usar conexión directa o pooling de sesión. La tabla se crea al iniciar; no hace falta un volumen adicional para el historial de la app.
+3. Configurar las variables de la app:
+
+| Variable | Valor / uso |
+| --- | --- |
+| `DASHBOARD_PASSWORD` | Contraseña nueva de al menos 12 caracteres; usuario `admin`. |
+| `DATA_DIR` | `/data` si se usa el volumen. |
+| `DATABASE_URL` | Referencia a PostgreSQL solo si se elige esa opción. |
+| `CREDENTIALS_KEY` | 64 caracteres hexadecimales para guardar APIs en PostgreSQL; conservar entre deploys. Generar con el comando de la guía local. |
+| `UNDEAD_API_KEY` o `AGENT_N_UNDEAD_API_KEY` | Opcionales al iniciar; también se pueden guardar las APIs desde el panel. |
+| `PORT` | Usar el puerto asignado por Railway; la app lo lee automáticamente. |
+
+4. Mantener un único worker continuo, sin suspensión. No configurar un cron: el proceso comprueba por sí mismo si hay acciones debidas cada cinco segundos.
+5. Desplegar y generar un dominio público HTTPS en la configuración de red del servicio, apuntando al puerto de la app.
+6. Abrir el dominio con usuario `admin`, configurar una estrategia y conectar su API. Activar primero el modo de prueba y revisar la conexión antes de cambiar a automático con saldo virtual.
+
+En una instalación nueva aparece un agente vacío. El historial pertenece a esa instalación y persiste en su volumen o PostgreSQL; clonar el código no copia las cuentas de nuestro servicio actual.
+
+[PostgreSQL en Railway](https://docs.railway.com/databases/postgresql) · [Volúmenes persistentes](https://docs.railway.com/volumes).
+
+
+## Guía 3: despliegue en Vercel
+
+La aplicación incluye `api/index.js` y `vercel.json`. **Vercel requiere PostgreSQL externo**: el código crea las tablas, pero la instancia de base de datos debe aprovisionarse y conectarse al proyecto. Sus archivos temporales no sirven para conservar el historial.
+
+### Preparar PostgreSQL y las variables
+
+1. Crear una base PostgreSQL dedicada a esta instalación y obtener una conexión **directa o con pooling de sesión**. No usar PgBouncer en modo transaction: el motor usa un advisory lock de sesión para serializar ejecuciones y guardar cada intención antes de enviar una orden.
+2. Generar una `CREDENTIALS_KEY` de 64 caracteres hexadecimales con el comando de la guía local. Generar también un `CRON_SECRET` aleatorio independiente. Conservar ambos fuera de Git.
+3. Si se quiere trasladar el bot actual de Railway, **migrar primero sus datos a la base vacía y detener el worker anterior antes de activar el cron**; seguir [Actualizar la instalación anterior](#actualizar-la-instalación-anterior). Para otra instalación independiente, usar otras claves API y otra base de datos.
+
+### Importar y desplegar el repositorio
+
+1. En Vercel, importar [technetech/botundead](https://github.com/technetech/botundead). Elegir el preset **Other**, Node.js 22 o posterior, raíz del repositorio, sin comando de build ni output directory personalizado.
+2. Agregar las variables al entorno **Production** del proyecto:
+
+| Variable | Obligatoria | Uso |
+| --- | --- | --- |
+| `DATABASE_URL` | Sí | Conexión PostgreSQL directa o con pooling de sesión. |
+| `DASHBOARD_PASSWORD` | Sí | Al menos 12 caracteres; usuario del panel: `admin`. |
+| `CREDENTIALS_KEY` | Para APIs guardadas desde el panel | Clave de cifrado de 64 caracteres hexadecimales; conservar en redeploys. |
+| `CRON_SECRET` | Sí para operar por cron | Secreto independiente que protege `/api/cron`. |
+| `AGENT_N_UNDEAD_API_KEY` | No | API por espacio; también se puede introducir desde el panel. |
+
+3. Configurar la ejecución programada **antes de desplegar**:
+   - **Plan con cron cada minuto**: conservar el bloque `crons` incluido en `vercel.json`. Vercel invocará `GET /api/cron` cada minuto con `Authorization: Bearer CRON_SECRET`.
+   - **Hobby**: su cron solo admite frecuencia diaria. Quitar únicamente el bloque `crons` de `vercel.json` y configurar un programador externo para llamar cada minuto a `https://TU-DOMINIO/api/cron`, método `GET`, con el encabezado `Authorization: Bearer TU_CRON_SECRET`. Conservar `functions` y `rewrites`.
+4. Desplegar. La primera solicitud inicializa la tabla y el primer agente en PostgreSQL. Si se cambian variables después, hacer un nuevo deploy para aplicarlas.
+5. Abrir el dominio con usuario `admin`, entrar en una tarjeta y guardar su estrategia y API. Mantener el agente en prueba mientras se valida que el cron está funcionando.
+6. Verificar en los logs de Vercel que `/api/cron` recibe llamadas, que responde correctamente y que la tarjeta muestra una fecha de consulta reciente. La actualización visual cada cinco segundos **no ejecuta las estrategias**: el motor depende del cron aun cuando nadie abra el panel.
+
+Los cron de Vercel se ejecutan sobre el despliegue de producción. No reutilizar las claves de producción en previews ni habilitar otro programador para la misma instalación.
+
+Vercel no garantiza puntualidad exacta del cron. Una llamada fuera de la ventana de entrada de 60 segundos omite el ciclo; no se abren órdenes atrasadas. La configuración limita la función a 300 segundos, sujeto al plan. Una interrupción puede dejar una intención pendiente que exige conciliación. Para nuestro bot continuo seguimos usando **Railway**.
+
+[Programación y límites de cron](https://vercel.com/docs/cron-jobs/usage-and-pricing) · [Autenticación y gestión](https://vercel.com/docs/cron-jobs/manage-cron-jobs).
+
+
+## Agentes y estrategia
+
+La entrada muestra una tarjeta por agente y una tarjeta **Nuevo agente** hasta completar los 10 espacios. Cada tarjeta abre:
+
+- **Resumen e historial**: saldo de la cuenta conectada, posiciones propias, próxima entrada, PnL disponible y registro de acciones. Incluye actividad anterior al último reinicio y permite mostrar más registros y filtrar posiciones.
+- **Estrategia**: nombre, prompt inicial, símbolos, margen por activo, apalancamiento, dirección long/short, modo de prueba/automático y activación.
+- **Conexiones API**: conexión de Undeadwallet y alta o sustitución de la clave, con indicación de su origen.
+
+El prompt es documentación de la estrategia; **no se interpreta con IA ni ejecuta código**. Las órdenes usan los parámetros estructurados. El motor conserva los horarios existentes: cada dos horas a las `00:25, 02:25, …, 22:25`, con cierre 90 minutos después, en `America/Monterrey`. Las posiciones anteriores conservan el horario que ya tenían registrado. Los símbolos, márgenes y apalancamientos también deben ser admitidos por el proveedor; su rechazo pausa ese agente.
+
+La API usa saldo **virtual USDG**, sin claves privadas ni transacciones on-chain. `dry-run` consulta y registra decisiones sin abrir ni cerrar posiciones; `live` opera con saldo virtual. El motor no tiene stop-loss ni take-profit. El panel no ofrece una apertura manual inmediata.
+
+## Claves API
+
+Cada agente necesita una API key independiente. Se rechaza reutilizar una key entre espacios. Se puede configurar desde el panel, desde `.env` o desde variables de Vercel/Railway:
+
+```dotenv
+AGENT_1_UNDEAD_API_KEY=...
+AGENT_2_UNDEAD_API_KEY=...
+# Hasta AGENT_10_UNDEAD_API_KEY.
+```
+
+El primer espacio también admite la variable heredada `UNDEAD_API_KEY`. Prioridad: variable `AGENT_N_UNDEAD_API_KEY`, después `UNDEAD_API_KEY` para el primer agente, después clave cifrada del panel. Las variables de entorno nunca se copian al documento persistente. El navegador recibe únicamente origen y estado de configuración, nunca la clave guardada.
+
+Las claves del panel se cifran con AES-256-GCM. PostgreSQL requiere `CREDENTIALS_KEY` para guardarlas o leerlas. Conservar esta clave al cambiar de servidor, restaurar un respaldo o desplegar de nuevo. No subir `.env`, `data/` ni secretos al repositorio. Usar HTTPS en despliegues públicos.
+
+## Actualizar la instalación anterior
+
+Detener la instancia anterior y respaldar el volumen. Al iniciar con un workspace vacío, se importa `DATA_DIR/state.json` al primer agente **una sola vez** y se conserva `bot-id`, IDs de posiciones, ciclos y pausas. El modo se toma de `BOT_MODE` y se conserva la activación si existe `UNDEAD_API_KEY`. No se borra ni modifica el archivo antiguo: desde la migración, el estado vigente es `workspace.json` o PostgreSQL.
+
+Para migrar directamente a PostgreSQL, configurar `DATABASE_URL` y montar temporalmente el volumen anterior en `DATA_DIR` durante el primer inicio. No abrir antes una instalación vacía en esa base: la importación solo ocurre si no existe ya un workspace. Para pasar a Vercel, hacer primero esta importación desde un proceso local/Railway conectado a la base de destino y luego detenerlo antes de activar el cron. No ejecutar dos instalaciones con las mismas claves sobre almacenamientos distintos.
+
+No se puede recuperar actividad de sesiones anteriores que la versión antigua nunca guardó. Las posiciones históricas existentes sí se conservan.
+
+Si ya se usa esta versión en local, al conectar una base PostgreSQL vacía se importa primero el `workspace.json` completo de `DATA_DIR`, conservando todos sus agentes e historial. Si las APIs del panel usaban `data/credentials.key`, configurar ese mismo valor como `CREDENTIALS_KEY` en el destino antes de importar. Una base con datos existentes nunca se sobrescribe con archivos locales. Detener siempre el worker de origen antes de iniciar el de destino.
+
+## Persistencia y recuperación
+
+Los archivos usan escritura con fsync y reemplazo atómico. PostgreSQL serializa operaciones con un advisory lock y confirma cada intención **antes** de enviar una orden; no engloba órdenes de red en una transacción que pudiera revertir esa intención. El estado y la actividad quedan separados por agente. Los IDs e intenciones impiden repetir aperturas en reinicios o invocaciones concurrentes.
+
+Un rechazo o una respuesta incierta pausa de forma persistente al agente afectado, incluidos sus cierres. No se reenvían órdenes inciertas. Los otros agentes mantienen su propio estado. El panel muestra el motivo. Las lecturas de cuenta fallidas conservan los datos anteriores y su fecha; no se reintentan hasta restablecer el monitor mediante `resume` o guardar una configuración sin posiciones pendientes. Heartbeats y versión tienen sus propios intervalos.
+
+Procedimiento de recuperación:
+
+1. Detener el worker o desactivar el cron y hacer un respaldo del workspace/base de datos.
+2. Revisar el estado del espacio con `AGENT_SLOT=N npm run status` (en PowerShell: `$env:AGENT_SLOT='N'; npm.cmd run status`). Comparar las notas `undeadbot:FECHAT10:25:SIMBOLO:direccion` y los IDs con la cuenta real.
+3. Conciliar exclusivamente `agents[].state` del agente afectado en `workspace.json` o en el documento de `undeadbot_workspace`. Para una apertura `pending`, si existe inequívocamente la posición, registrar el ID y `status: "opened"` en el ciclo y conservar su posición en `positions`. Si nunca se abrió y está confirmado, marcar la entrada como `rejected`, conservando el ciclo. Para un cierre `closing`, verificar si ya cerró (`closed`) o si sigue abierta y no se ejecutó el cierre (`open`). Conservar fechas, IDs y `closeSeconds`. Si no hay certeza, dejar pausado.
+4. Corregir la causa y ejecutar `npm run resume` con `AGENT_SLOT` seleccionado. Se niega si quedan aperturas `pending` o posiciones `closing`. No cambia los ciclos ni borra posiciones. Reiniciar el worker o reactivar el cron; las entradas ya registradas no se repiten y se procesan cierres vencidos.
+
+El archivo `process.lock` impide iniciar dos procesos con el mismo directorio local. Si queda huérfano tras un apagado forzado, verificar que no siga activo ningún proceso antes de retirarlo. Nunca borrar el workspace, la identidad o el historial para resolver un bloqueo. No volver al binario anterior usando su `state.json` desactualizado después de operar con esta versión.
+
+## Validación
+
+```sh
+npm test
+npm run lint
+```
+
+Las pruebas cubren estrategia original, API simulada, historial, migración, cifrado, prioridad de variables, máximo de agentes, configuración por agente, aislamiento, reinicios, persistencia previa a órdenes, autenticación y CSRF. No envían operaciones a cuentas reales.
+
+Para ejecutar la prueba de integración PostgreSQL, configurar `TEST_DATABASE_URL` apuntando a una base **desechable**: esa prueba modifica sus agentes. GitHub Actions levanta PostgreSQL 17 y ejecuta también esta prueba. Sin esa variable se omite únicamente la integración PostgreSQL.
+
+La integración conserva el contrato de Undeadwallet API 1.17: `X-Asset-Key`, identidad estable `X-Bot-Id`, `/learn` antes de operar, `/heartbeat` sin body y comprobación periódica de `/version`. No se ha verificado contra una cuenta autenticada real como parte de esta modificación.

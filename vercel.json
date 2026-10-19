@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "functions": { "api/index.js": { "maxDuration": 300, "includeFiles": "{public/**,harness.md}" } },
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }],
+  "crons": [{ "path": "/api/cron", "schedule": "* * * * *" }]
+}

@@ -12,11 +12,12 @@ export function validateAccount(account) {
 }
 
 export class Bot {
-  constructor({ api, store, harness, mode = 'dry-run', now = () => new Date(), log = () => {} }) {
+  constructor({ api, store, harness, strategy = STRATEGY, mode = 'dry-run', now = () => new Date(), log = () => {} }) {
     this.api = api;
     this.store = store;
     this.harness = normalizeHarness(harness);
     this.mode = mode;
+    this.strategy = strategy;
     this.now = now;
     this.log = log;
     this.state = store.load();
@@ -24,10 +25,10 @@ export class Bot {
     this.previewed = new Set();
   }
 
-  save() { this.store.save(this.state); }
-  pause(message) {
+  async save() { await this.store.save(this.state); }
+  async pause(message) {
     this.state.paused = message;
-    this.save();
+    await this.save();
     this.log('paused', { reason: message });
   }
 
@@ -41,14 +42,14 @@ export class Bot {
       learnVersion: learned.learn_version,
       balance: account.balance_usdg,
       openPositions: account.open.length,
-      symbolsAvailable: STRATEGY.symbols.every(s => assets.assets.some(a => a.symbol === s)),
+      symbolsAvailable: this.strategy.symbols.every(s => assets.assets.some(a => a.symbol === s)),
     };
   }
 
   async tick() {
     if (this.state.paused) return;
     try { await this.runTick(); }
-    catch (error) { this.pause(error.message); }
+    catch (error) { await this.pause(error.message); }
   }
 
   async runTick() {
@@ -65,7 +66,7 @@ export class Bot {
           const closed = account.closed.find(a => a.id === p.id);
           if (Number.isFinite(closed?.pnl)) p.pnl = closed.pnl;
           p.closedAt = this.now().toISOString();
-          this.save();
+          await this.save();
           this.log('already_closed', { id: p.id });
           continue;
         }
@@ -75,17 +76,17 @@ export class Bot {
           continue;
         }
         p.status = 'closing';
-        this.save();
+        await this.save();
         try {
           const result = await this.api.close({ id: p.id, note: `undeadbot: cierre programado ${clock(p.closeSeconds ?? 64500)} America/Monterrey; entrada ${p.cycle ?? p.day} ${p.symbol}` });
           if (Number.isFinite(result.pnl)) p.pnl = result.pnl;
         } catch (error) {
-          if (error instanceof ApiError && !error.uncertain) { p.status = 'open'; this.save(); }
+          if (error instanceof ApiError && !error.uncertain) { p.status = 'open'; await this.save(); }
           throw error;
         }
         p.status = 'closed';
         p.closedAt = this.now().toISOString();
-        this.save();
+        await this.save();
         this.log('closed', { id: p.id, symbol: p.symbol });
       }
     }
@@ -98,18 +99,18 @@ export class Bot {
     if (this.mode === 'dry-run' && this.previewed.has(cycle.key)) return;
     await this.api.learn();
     const account = validateAccount(await this.api.account());
-    if (account.balance_usdg < 75) throw new Error('Saldo insuficiente: se necesitan 75 USDG libres');
+    if (account.balance_usdg < this.strategy.margin * this.strategy.symbols.length) throw new Error('Saldo insuficiente para el margen configurado');
     const assets = await this.api.assets();
-    if (!Array.isArray(assets.assets) || STRATEGY.symbols.some(s => !assets.assets.some(a => a.symbol === s && Number.isFinite(a.price_usd) && a.price_usd > 0))) {
+    if (!Array.isArray(assets.assets) || this.strategy.symbols.some(s => !assets.assets.some(a => a.symbol === s && Number.isFinite(a.price_usd) && a.price_usd > 0))) {
       throw new Error('Falta un activo o un precio valido en /assets');
     }
     if (this.mode === 'dry-run') {
-      this.preview(cycle.key, { action: 'open', symbols: STRATEGY.symbols, margin: 25, leverage: 10 });
+      this.preview(cycle.key, { action: 'open', symbols: this.strategy.symbols, margin: this.strategy.margin, leverage: this.strategy.leverage });
       return;
     }
     this.state.days[cycle.key] = {};
-    this.save();
-    for (const symbol of STRATEGY.symbols) {
+    await this.save();
+    for (const symbol of this.strategy.symbols) {
       const time = localTime(this.now());
       if (time.day !== current.day || time.seconds < cycle.open || time.seconds >= cycle.open + 60) {
         this.log('entry_window_missed', { symbol });
@@ -117,25 +118,25 @@ export class Bot {
       }
       const record = { status: 'pending' };
       this.state.days[cycle.key][symbol] = record;
-      this.save(); // Persistir la intencion ANTES de enviar la orden.
+      await this.save(); // Persistir la intencion ANTES de enviar la orden.
       let result;
       try {
-        result = await this.api.open({ symbol, direction: 'long', size_usd: 25, leverage: 10,
-          note: `undeadbot:${cycle.key}:${symbol}:long; margen 25 USDG; 10x; cierre ${clock(cycle.close)} America/Monterrey` });
+        result = await this.api.open({ symbol, direction: this.strategy.direction || 'long', size_usd: this.strategy.margin, leverage: this.strategy.leverage,
+          note: `undeadbot:${cycle.key}:${symbol}:${this.strategy.direction || "long"}; margen ${this.strategy.margin} USDG; ${this.strategy.leverage}x; cierre ${clock(cycle.close)} America/Monterrey` });
       } catch (error) {
-        if (error instanceof ApiError && !error.uncertain) { record.status = 'rejected'; this.save(); }
+        if (error instanceof ApiError && !error.uncertain) { record.status = 'rejected'; await this.save(); }
         throw error;
       }
       const p = result.position;
-      if (!p || !Number.isSafeInteger(p.id) || p.id <= 0 || p.symbol !== symbol || p.direction !== 'long' || p.status !== 'open'
+      if (!p || !Number.isSafeInteger(p.id) || p.id <= 0 || p.symbol !== symbol || p.direction !== (this.strategy.direction || 'long') || p.status !== 'open'
           || this.state.positions.some(old => old.id === p.id)) {
         throw new Error('Respuesta de apertura inesperada; revisar la cuenta sin repetir la orden');
       }
       record.status = 'opened';
       record.id = p.id;
-      this.state.positions.push({ id: p.id, symbol, day: current.day, cycle: cycle.key, closeSeconds: cycle.close,
-        margin: 25, leverage: 10, openedAt: this.now().toISOString(), status: 'open' });
-      this.save();
+      this.state.positions.push({ id: p.id, symbol, direction: this.strategy.direction || 'long', day: current.day, cycle: cycle.key, closeSeconds: cycle.close,
+        margin: this.strategy.margin, leverage: this.strategy.leverage, openedAt: this.now().toISOString(), status: 'open' });
+      await this.save();
       this.log('opened', { id: p.id, symbol });
     }
   }
