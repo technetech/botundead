@@ -6,8 +6,11 @@ import { STRATEGY } from './schedule.js';
 
 export const defaultHarness = fs.readFileSync(new URL('../harness.md', import.meta.url), 'utf8');
 export function newAgent(slot, input = {}) {
+  const initialCapital = input.initialCapital ?? 1000;
+  const symbols = initialCapital < 0.03 ? ['BTC'] : [...STRATEGY.symbols];
+  const margin = Math.min(STRATEGY.margin, Math.floor(initialCapital * 100 / symbols.length) / 100);
   return { id: randomUUID(), slot, name: input.name || `Agente ${slot}`, prompt: input.prompt || defaultHarness,
-    strategy: { ...STRATEGY, direction: 'long' }, mode: 'dry-run', enabled: false,
+    strategy: { ...STRATEGY, symbols, margin, direction: 'long' }, engine: 'bot', initialCapital, connections: [], mode: 'dry-run', enabled: false,
     botId: randomUUID(), state: initialState(), events: [], createdAt: new Date().toISOString(),
     startedAt: new Date().toISOString(), monitor: null };
 }
@@ -46,7 +49,10 @@ export class Workspace {
     if (this.kind === 'postgres' && fs.existsSync(this.file)) {
       const imported = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       if (imported.version !== 1 || !Array.isArray(imported.agents)) throw new Error('Workspace local inválido para importar');
-      for (const agent of imported.agents) if (agent.secret) this.key({ ...agent, slot: 0 });
+      for (const agent of imported.agents) {
+        if (agent.secret) this.decrypt(agent.secret);
+        for (const connection of agent.connections || []) if (connection.secret) this.decrypt(connection.secret);
+      }
       return imported;
     }
     const agent = newAgent(1);
@@ -55,6 +61,8 @@ export class Workspace {
       const legacy = new Store(this.directory);
       agent.state = legacy.load(); agent.botId = legacy.botId();
       agent.mode = this.env.BOT_MODE || 'dry-run'; agent.enabled = Boolean(this.env.UNDEAD_API_KEY);
+      agent.engine = 'legacy';
+      delete agent.initialCapital;
       agent.name = 'Agente principal';
     }
     return { version: 1, agents: [agent] };
@@ -77,7 +85,7 @@ export class Workspace {
         existing = fs.existsSync(this.file);
         this.data = existing ? JSON.parse(fs.readFileSync(this.file, 'utf8')) : this.seed();
       }
-      if (this.data.version !== 1 || !Array.isArray(this.data.agents) || this.data.agents.length < 1 || this.data.agents.length > 10) throw new Error('Workspace invalido; revisar respaldo');
+      if (this.data.version !== 1 || !Array.isArray(this.data.agents) || this.data.agents.length > 10) throw new Error('Workspace invalido; revisar respaldo');
       let saved = existing ? JSON.stringify(this.data) : null;
       const save = async () => {
         const serialized = JSON.stringify(this.data);
@@ -118,14 +126,17 @@ export class Workspace {
     const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
     return [iv.toString('hex'), cipher.getAuthTag().toString('hex'), encrypted.toString('hex')].join(':');
   }
+  decrypt(secret) {
+    const [iv, tag, value] = secret.split(':');
+    const cipher = createDecipheriv('aes-256-gcm', this.encryptionKey(), Buffer.from(iv, 'hex'));
+    cipher.setAuthTag(Buffer.from(tag, 'hex'));
+    return Buffer.concat([cipher.update(Buffer.from(value, 'hex')), cipher.final()]).toString('utf8');
+  }
   key(agent) {
     const envKey = this.env[`AGENT_${agent.slot}_UNDEAD_API_KEY`] || (agent.slot === 1 ? this.env.UNDEAD_API_KEY : '');
     if (envKey?.trim()) return envKey.trim();
     if (!agent.secret) return '';
-    const [iv, tag, value] = agent.secret.split(':');
-    const cipher = createDecipheriv('aes-256-gcm', this.encryptionKey(), Buffer.from(iv, 'hex'));
-    cipher.setAuthTag(Buffer.from(tag, 'hex'));
-    return Buffer.concat([cipher.update(Buffer.from(value, 'hex')), cipher.final()]).toString('utf8');
+    return this.decrypt(agent.secret);
   }
   source(agent) {
     return (this.env[`AGENT_${agent.slot}_UNDEAD_API_KEY`] || (agent.slot === 1 && this.env.UNDEAD_API_KEY)) ? 'environment' : agent.secret ? 'panel' : null;

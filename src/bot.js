@@ -12,12 +12,13 @@ export function validateAccount(account) {
 }
 
 export class Bot {
-  constructor({ api, store, harness, strategy = STRATEGY, mode = 'dry-run', now = () => new Date(), log = () => {} }) {
+  constructor({ api, store, harness, strategy = STRATEGY, initialCapital = Infinity, mode = 'dry-run', now = () => new Date(), log = () => {} }) {
     this.api = api;
     this.store = store;
     this.harness = normalizeHarness(harness);
     this.mode = mode;
     this.strategy = strategy;
+    this.initialCapital = initialCapital;
     this.now = now;
     this.log = log;
     this.state = store.load();
@@ -99,18 +100,22 @@ export class Bot {
     if (this.mode === 'dry-run' && this.previewed.has(cycle.key)) return;
     await this.api.learn();
     const account = validateAccount(await this.api.account());
-    if (account.balance_usdg < this.strategy.margin * this.strategy.symbols.length) throw new Error('Saldo insuficiente para el margen configurado');
+    const entries = this.strategy.entries || this.strategy.symbols.map(symbol => ({ symbol, margin: this.strategy.margin, leverage: this.strategy.leverage, direction: this.strategy.direction || 'long' }));
+    const totalMargin = entries.reduce((sum, p) => sum + p.margin, 0);
+    const capital = this.initialCapital + this.state.positions.filter(p => p.status === 'closed').reduce((sum, p) => sum + (Number.isFinite(p.pnl) ? p.pnl : 0), 0);
+    if (Math.min(account.balance_usdg, capital) < totalMargin) throw new Error('Saldo o capital del espacio insuficiente para el margen configurado');
     const assets = await this.api.assets();
     if (!Array.isArray(assets.assets) || this.strategy.symbols.some(s => !assets.assets.some(a => a.symbol === s && Number.isFinite(a.price_usd) && a.price_usd > 0))) {
       throw new Error('Falta un activo o un precio valido en /assets');
     }
     if (this.mode === 'dry-run') {
-      this.preview(cycle.key, { action: 'open', symbols: this.strategy.symbols, margin: this.strategy.margin, leverage: this.strategy.leverage });
+      this.preview(cycle.key, { action: 'open', symbols: this.strategy.symbols, margin: this.strategy.margin, leverage: this.strategy.leverage, entries });
       return;
     }
     this.state.days[cycle.key] = {};
     await this.save();
-    for (const symbol of this.strategy.symbols) {
+    for (const entry of entries) {
+      const { symbol, margin, leverage, direction } = entry;
       const time = localTime(this.now());
       if (time.day !== current.day || time.seconds < cycle.open || time.seconds >= cycle.open + 60) {
         this.log('entry_window_missed', { symbol });
@@ -121,21 +126,21 @@ export class Bot {
       await this.save(); // Persistir la intencion ANTES de enviar la orden.
       let result;
       try {
-        result = await this.api.open({ symbol, direction: this.strategy.direction || 'long', size_usd: this.strategy.margin, leverage: this.strategy.leverage,
-          note: `undeadbot:${cycle.key}:${symbol}:${this.strategy.direction || "long"}; margen ${this.strategy.margin} USDG; ${this.strategy.leverage}x; cierre ${clock(cycle.close)} America/Monterrey` });
+        result = await this.api.open({ symbol, direction, size_usd: margin, leverage,
+          note: `undeadbot:${cycle.key}:${symbol}:${direction}; margen ${margin} USDG; ${leverage}x; cierre ${clock(cycle.close)} America/Monterrey` });
       } catch (error) {
         if (error instanceof ApiError && !error.uncertain) { record.status = 'rejected'; await this.save(); }
         throw error;
       }
       const p = result.position;
-      if (!p || !Number.isSafeInteger(p.id) || p.id <= 0 || p.symbol !== symbol || p.direction !== (this.strategy.direction || 'long') || p.status !== 'open'
+      if (!p || !Number.isSafeInteger(p.id) || p.id <= 0 || p.symbol !== symbol || p.direction !== direction || p.status !== 'open'
           || this.state.positions.some(old => old.id === p.id)) {
         throw new Error('Respuesta de apertura inesperada; revisar la cuenta sin repetir la orden');
       }
       record.status = 'opened';
       record.id = p.id;
-      this.state.positions.push({ id: p.id, symbol, direction: this.strategy.direction || 'long', day: current.day, cycle: cycle.key, closeSeconds: cycle.close,
-        margin: this.strategy.margin, leverage: this.strategy.leverage, openedAt: this.now().toISOString(), status: 'open' });
+      this.state.positions.push({ id: p.id, symbol, direction, day: current.day, cycle: cycle.key, closeSeconds: cycle.close,
+        margin, leverage, openedAt: this.now().toISOString(), status: 'open' });
       await this.save();
       this.log('opened', { id: p.id, symbol });
     }

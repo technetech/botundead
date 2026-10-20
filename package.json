@@ -13,7 +13,7 @@
     "status": "node --env-file-if-exists=.env src/main.js status",
     "resume": "node --env-file-if-exists=.env src/main.js resume",
     "test": "node --test",
-    "lint": "node --check src/main.js && node --check src/bot.js && node --check src/api.js && node --check src/store.js && node --check src/schedule.js && node --check src/dashboard.js && node --check public/app.js && node --check src/workspace.js && node --check src/agents.js && node --check api/index.js"
+    "lint": "node --check src/main.js && node --check src/bot.js && node --check src/api.js && node --check src/store.js && node --check src/schedule.js && node --check src/dashboard.js && node --check public/app.js && node --check src/workspace.js && node --check src/agents.js && node --check api/index.js && node --check src/connections.js && node --check src/prompt-bot.js"
   },
   "dependencies": {
     "pg": "^8.23.1"

@@ -1,4 +1,5 @@
 const BASE = 'https://undeadwallet.com/api/trading/agent';
+let documentationCache;
 
 export class ApiError extends Error {
   constructor(message, uncertain = false) {
@@ -53,6 +54,17 @@ export class Api {
     return data;
   }
   assets() { return this.request('/assets'); }
+  async documentation() {
+    if (documentationCache && documentationCache.expires > Date.now()) return documentationCache.data;
+    const response = await this.fetch(`${BASE}/docsapi`, { headers: this.botId ? { 'X-Bot-Id': this.botId } : {}, signal: AbortSignal.timeout(15000), redirect: 'error' });
+    if (!response.ok) throw new ApiError('No se pudo consultar el contrato de Undeadwallet');
+    const doc = await response.json();
+    const open = doc.paths?.['/open']?.post?.requestBody?.content?.['application/json']?.schema;
+    const close = doc.paths?.['/close']?.post?.requestBody?.content?.['application/json']?.schema;
+    if (!open?.properties?.size_usd || !close?.properties?.id) throw new ApiError('Contrato de Undeadwallet no compatible; revisar antes de operar');
+    const data = { version: doc.info?.version, open, close };
+    documentationCache = { data, expires: Date.now() + 3600000 }; return data;
+  }
   async version() {
     const data = await this.request('/version');
     if (typeof data.version !== 'string' || !data.version.trim()

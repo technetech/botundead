@@ -34,7 +34,7 @@ export function snapshot(bot, monitor, events, now = new Date()) {
     const closed = account?.closed.find(a => a.id === p.id);
     return { id: p.id, symbol: p.symbol, direction: p.direction || 'long', status: p.status, day: p.day, cycle: p.cycle ?? 'Estrategia diaria anterior',
       margin: p.margin ?? 100, leverage: p.leverage ?? 3,
-      closeAt: `${p.day} ${clock(p.closeSeconds ?? 64500)}`,
+      closeAt: p.engine === 'agent' ? (p.closeAt || 'Según estrategia') : `${p.day} ${clock(p.closeSeconds ?? 64500)}`,
       price: Number.isFinite(live?.price_usd) ? live.price_usd : null,
       pnl: Number.isFinite(live?.live_pnl) ? live.live_pnl : (p.pnl ?? (Number.isFinite(closed?.pnl) ? closed.pnl : null)),
       accountStatus: live ? 'open' : closed ? 'closed' : 'unknown' };
@@ -93,7 +93,9 @@ export function dashboardHandler({ getSnapshot, password, agents, cronSecret }) 
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       if (req.method === 'GET' && route === '/api/agents') { res.end(JSON.stringify(await agents.list())); return; }
       const match = route.match(/^\/api\/agents\/([a-f0-9-]+)$/);
-      if (req.method === 'POST' || req.method === 'PUT') {
+      const catalog = route.match(/^\/api\/agents\/([a-f0-9-]+)\/assets$/);
+      if (req.method === 'GET' && catalog) { res.end(JSON.stringify(await agents.assets(catalog[1]))); return; }
+      if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE') {
         const origin = req.headers.origin;
         if ((origin && new URL(origin).host !== req.headers.host) || req.headers['sec-fetch-site'] === 'cross-site') { res.writeHead(403); res.end('{}'); return; }
         if (!req.headers['content-type']?.startsWith('application/json')) { res.writeHead(415); res.end('{}'); return; }
@@ -103,6 +105,7 @@ export function dashboardHandler({ getSnapshot, password, agents, cronSecret }) 
         if (Buffer.byteLength(raw) > 40000) { res.writeHead(413); res.end('{}'); return; }
         let input; try { input = JSON.parse(raw); } catch { res.writeHead(400); res.end('{"error":"JSON inválido"}'); return; }
         if (!input || typeof input !== 'object' || Array.isArray(input)) { res.writeHead(400); res.end('{}'); return; }
+        if (req.method === 'DELETE' && match) { res.end(JSON.stringify(await agents.remove(match[1]))); return; }
         if (req.method === 'POST' && route === '/api/agents') { const result = await agents.create(input); res.writeHead(201); res.end(JSON.stringify(result)); return; }
         if (req.method === 'PUT' && match) { res.end(JSON.stringify(await agents.update(match[1], input))); return; }
       }

@@ -1,8 +1,8 @@
 # Undeadbot
 
-Panel privado de **1 a 10 agentes** de paper trading para Undeadwallet, con estrategia, conexión API, posiciones y actividad persistentes por agente. Conserva la interfaz oscura y verde original. Requiere Node.js 22 o posterior.
+Panel privado de **hasta 10 espacios** de paper trading para Undeadwallet, cada uno en modo **Agente (IA)** o **Bot (reglas)**, con estrategia, conexiones API, posiciones y actividad persistentes. Conserva la interfaz oscura y verde original. Requiere Node.js 22 o posterior.
 
-Cada instalación tiene sus propios datos: clonar el repositorio crea un espacio inicial vacío, no copia cuentas, claves ni el historial privado de otra instalación. Los nuevos agentes empiezan desactivados y en `dry-run`. No hace falta una API key para abrir el panel y preparar agentes.
+Cada instalación tiene sus propios datos: clonar el repositorio crea un espacio inicial vacío, no copia cuentas, claves ni el historial privado de otra instalación. Los espacios nuevos quedan pendientes de configuración. Al guardar una estrategia completa con sus conexiones, empiezan a operar automáticamente con USDG virtuales. No hace falta una API key para abrir el panel y preparar agentes.
 
 ## Guías de despliegue
 
@@ -40,7 +40,7 @@ cp .env.example .env
 1. Editar `.env` y configurar `DASHBOARD_PASSWORD` con al menos 12 caracteres. Mantener `DATA_DIR=./data` y dejar `DATABASE_URL` vacío para usar almacenamiento local. No hace falta una API key para iniciar el panel.
 2. Ejecutar `npm.cmd start` en PowerShell o `npm start` en macOS / Linux. Mantener ese proceso activo para ejecutar las estrategias; cerrar la terminal detiene el motor.
 3. Abrir [http://localhost:3000](http://localhost:3000). Entrar con usuario **admin** y la contraseña elegida.
-4. Abrir la primera tarjeta o crear otro agente. En **Conexiones API**, guardar una clave de Undeadwallet, o configurar `AGENT_N_UNDEAD_API_KEY` en `.env` y reiniciar. En **Estrategia**, guardar los parámetros y activar el agente. Probar primero en modo **Prueba**.
+4. Abrir la primera tarjeta o crear otro agente. En **Conexiones API**, guardar una clave de Undeadwallet, o configurar `AGENT_N_UNDEAD_API_KEY` en `.env` y reiniciar. En **Estrategia**, elegir Agente o Bot y guardar la configuración. Cuando estén completas las conexiones necesarias, el espacio comenzará a operar con USDG virtuales automáticamente.
 5. Confirmar en **Resumen e historial** que la cuenta tiene una fecha de consulta y no hay errores. El siguiente ciclo solo puede ejecutarse si el motor ya estaba activo antes de su apertura.
 
 El almacenamiento se crea automáticamente en `DATA_DIR`. No hay que instalar un servidor de base de datos para esta opción: `data/workspace.json` contiene agentes, identidades, posiciones, pausas, conexiones cifradas e historial. `data/credentials.key` guarda la clave de cifrado local cuando no se configura `CREDENTIALS_KEY`. Respaldar ambos y conservar `data/` al actualizar.
@@ -80,7 +80,7 @@ El volumen `postgres-data` conserva PostgreSQL entre reinicios. **No usar `docke
 3. Subir esta versión a la rama conectada al servicio. Si Railway tiene despliegues automáticos, el push inicia un deploy; si están desactivados, desplegar el último commit desde el servicio. Verificar que termine el proceso anterior antes de que arranque el nuevo; `railway.json` conserva `overlapSeconds=0` y el margen de cierre.
 4. Al primer arranque, si todavía no existe un workspace, el código importa `/data/state.json` y `/data/bot-id` al **Agente principal**, conservando posiciones, ciclos, IDs y pausas. El modo se importa desde `BOT_MODE`. El archivo antiguo queda como respaldo; el estado vigente pasa a `/data/workspace.json`.
 5. Entrar al **mismo dominio de Railway** con usuario `admin` y la contraseña actual. Verificar la primera tarjeta, el modo del agente, los IDs de posiciones y el historial importado. Una pausa previa seguirá visible y debe conciliarse; actualizar no la elimina.
-6. Abrir **Conexiones API** y confirmar que el origen es **Variable de entorno**. Para el segundo agente y siguientes, usar claves independientes desde el panel o `AGENT_2_UNDEAD_API_KEY`, …, `AGENT_10_UNDEAD_API_KEY`. Los agentes nuevos empiezan desactivados y en prueba.
+6. Abrir **Conexiones API** y confirmar que el origen es **Variable de entorno**. Para el segundo agente y siguientes, usar claves independientes desde el panel o `AGENT_2_UNDEAD_API_KEY`, …, `AGENT_10_UNDEAD_API_KEY`. Los espacios nuevos empiezan pendientes de configuración y se ponen en marcha al guardar con las conexiones necesarias.
 7. Revisar los logs de inicio, la fecha de la última consulta y el próximo ciclo. `/health` solo confirma que responde el proceso HTTP; no demuestra que la API esté conectada ni que se hayan enviado órdenes. Mantener los respaldos y conservar el volumen en los próximos deploys.
 
 Si se usa almacenamiento por archivos y se guardan claves desde el panel, el cifrado local se genera en `/data/credentials.key`. Respaldarlo junto con el workspace. No añadir `DATABASE_URL` durante una actualización normal: cambiar de almacenamiento debe hacerse con una migración planificada.
@@ -104,7 +104,7 @@ Si se usa almacenamiento por archivos y se guardan claves desde el panel, el cif
 
 4. Mantener un único worker continuo, sin suspensión. No configurar un cron: el proceso comprueba por sí mismo si hay acciones debidas cada cinco segundos.
 5. Desplegar y generar un dominio público HTTPS en la configuración de red del servicio, apuntando al puerto de la app.
-6. Abrir el dominio con usuario `admin`, configurar una estrategia y conectar su API. Activar primero el modo de prueba y revisar la conexión antes de cambiar a automático con saldo virtual.
+6. Abrir el dominio con usuario `admin`, configurar una estrategia y conectar su API. Guardar la configuración completa para iniciar automáticamente la operación con saldo virtual y revisar que la cuenta se consulte correctamente.
 
 En una instalación nueva aparece un agente vacío. El historial pertenece a esa instalación y persiste en su volumen o PostgreSQL; clonar el código no copia las cuentas de nuestro servicio actual.
 
@@ -137,8 +137,8 @@ La aplicación incluye `api/index.js` y `vercel.json`. **Vercel requiere Postgre
 3. Configurar la ejecución programada **antes de desplegar**:
    - **Plan con cron cada minuto**: conservar el bloque `crons` incluido en `vercel.json`. Vercel invocará `GET /api/cron` cada minuto con `Authorization: Bearer CRON_SECRET`.
    - **Hobby**: su cron solo admite frecuencia diaria. Quitar únicamente el bloque `crons` de `vercel.json` y configurar un programador externo para llamar cada minuto a `https://TU-DOMINIO/api/cron`, método `GET`, con el encabezado `Authorization: Bearer TU_CRON_SECRET`. Conservar `functions` y `rewrites`.
-4. Desplegar. La primera solicitud inicializa la tabla y el primer agente en PostgreSQL. Si se cambian variables después, hacer un nuevo deploy para aplicarlas.
-5. Abrir el dominio con usuario `admin`, entrar en una tarjeta y guardar su estrategia y API. Mantener el agente en prueba mientras se valida que el cron está funcionando.
+4. Desplegar. La primera solicitud inicializa la tabla y el primer agente en PostgreSQL. Si se cambian variables después, hacer un nuevo deploy para aplicarlas y volver a guardar el espacio que estaba pendiente de conexiones.
+5. Abrir el dominio con usuario `admin`, entrar en una tarjeta y guardar su estrategia y API. Al guardar con las conexiones necesarias, el espacio queda en marcha; verificar que el cron esté funcionando.
 6. Verificar en los logs de Vercel que `/api/cron` recibe llamadas, que responde correctamente y que la tarjeta muestra una fecha de consulta reciente. La actualización visual cada cinco segundos **no ejecuta las estrategias**: el motor depende del cron aun cuando nadie abra el panel.
 
 Los cron de Vercel se ejecutan sobre el despliegue de producción. No reutilizar las claves de producción en previews ni habilitar otro programador para la misma instalación.
@@ -148,17 +148,28 @@ Vercel no garantiza puntualidad exacta del cron. Una llamada fuera de la ventana
 [Programación y límites de cron](https://vercel.com/docs/cron-jobs/usage-and-pricing) · [Autenticación y gestión](https://vercel.com/docs/cron-jobs/manage-cron-jobs).
 
 
-## Agentes y estrategia
+## Espacios, capital y modos de ejecución
 
 La entrada muestra una tarjeta por agente y una tarjeta **Nuevo agente** hasta completar los 10 espacios. Cada tarjeta abre:
 
 - **Resumen e historial**: saldo de la cuenta conectada, posiciones propias, próxima entrada, PnL disponible y registro de acciones. Incluye actividad anterior al último reinicio y permite mostrar más registros y filtrar posiciones.
-- **Estrategia**: nombre, prompt inicial, símbolos, margen por activo, apalancamiento, dirección long/short, modo de prueba/automático y activación.
-- **Conexiones API**: conexión de Undeadwallet y alta o sustitución de la clave, con indicación de su origen.
+- **Estrategia**: nombre e instrucción, selector exclusivo Agente/Bot e inicio automático al guardar una configuración completa. En modo Bot se configuran posiciones individuales con activo, margen, apalancamiento y dirección.
+- **Conexiones API**: Undeadwallet y botón **Añadir API** para conectar individualmente un proveedor de IA o fuentes de datos JSON. Cada conexión conserva su propio nombre, URL, autenticación y credencial cifrada.
 
-El prompt es documentación de la estrategia; **no se interpreta con IA ni ejecuta código**. Las órdenes usan los parámetros estructurados. El motor conserva los horarios existentes: cada dos horas a las `00:25, 02:25, …, 22:25`, con cierre 90 minutos después, en `America/Monterrey`. Las posiciones anteriores conservan el horario que ya tenían registrado. Los símbolos, márgenes y apalancamientos también deben ser admitidos por el proveedor; su rechazo pausa ese agente.
+Al crear un espacio se indica su **capital inicial**, mayor que cero y hasta **1.000.000 USDG**, con dos decimales como máximo. Es un presupuesto del motor, no un depósito: no llama al faucet ni genera saldo en Undeadwallet. El margen permitido también queda limitado por el saldo disponible de la API. Los registros heredados conservan su operativa y no reciben un nuevo capital artificial.
 
-La API usa saldo **virtual USDG**, sin claves privadas ni transacciones on-chain. `dry-run` consulta y registra decisiones sin abrir ni cerrar posiciones; `live` opera con saldo virtual. El motor no tiene stop-loss ni take-profit. El panel no ofrece una apertura manual inmediata.
+Solo se puede seleccionar un modo por espacio:
+
+- **Modo Bot**: ejecuta las posiciones configuradas con reglas deterministas. Los desplegables cargan el catálogo autenticado de `/assets` de Undeadwallet, agrupando criptomonedas, acciones / stocks y otros tipos. Cada fila tiene margen, apalancamiento y dirección propios; **Añadir posición / Quitar** modifica futuras entradas, sin enviar órdenes inmediatas. Mantiene aperturas cada dos horas a las :25 y cierres 90 minutos después, en America/Monterrey. No necesita una API de IA.
+- **Modo Agente**: interpreta la instrucción con el modelo conectado y evalúa, como máximo una vez por minuto, la hora, activos, posiciones propias, historial y fuentes de datos conectadas. Consulta `/learn` y el contrato público `/docsapi`; valida la respuesta de IA antes de traducirla a `/open` o `/close`. No ejecuta código generado ni URLs sugeridas por el modelo. Los motivos, decisiones y operaciones quedan registrados.
+
+Guardar inicia el espacio cuando están configuradas la API de Undeadwallet y, en modo Agente, la IA y sus fuentes autenticadas. Si faltan conexiones, se conserva la configuración y se indican las pendientes. Guardar no abre una posición inmediata ni borra pausas por error: el motor sigue el horario del Bot o las decisiones del Agente.
+
+Para cambiar de modo o configuración primero deben cerrarse o conciliarse las posiciones y órdenes pendientes. Los espacios anteriores se conservan en modo Bot. La interfaz no cambia por sí sola la estrategia de una instalación ya activa.
+
+En cada tarjeta exterior hay un botón **Eliminar espacio**. Se puede quitar también el último espacio y crear uno nuevo después. La eliminación libera su tarjeta y conserva un registro archivado en almacenamiento; no modifica el saldo ni envía cierres. Se rechaza si quedan posiciones u órdenes pendientes, para no perder su gestión.
+
+La API usa saldo **virtual USDG**, sin claves privadas ni transacciones on-chain. La interfaz opera con saldo virtual al guardar una configuración completa, sin selector adicional de prueba ni casilla de activación. El motor conserva `dry-run` para compatibilidad con estados anteriores y pruebas automatizadas; no se activa ni cambia una instalación heredada por el simple hecho de abrir el panel. El motor no tiene stop-loss ni take-profit. El panel no ofrece una apertura manual inmediata.
 
 ## Claves API
 
@@ -173,6 +184,24 @@ AGENT_2_UNDEAD_API_KEY=...
 El primer espacio también admite la variable heredada `UNDEAD_API_KEY`. Prioridad: variable `AGENT_N_UNDEAD_API_KEY`, después `UNDEAD_API_KEY` para el primer agente, después clave cifrada del panel. Las variables de entorno nunca se copian al documento persistente. El navegador recibe únicamente origen y estado de configuración, nunca la clave guardada.
 
 Las claves del panel se cifran con AES-256-GCM. PostgreSQL requiere `CREDENTIALS_KEY` para guardarlas o leerlas. Conservar esta clave al cambiar de servidor, restaurar un respaldo o desplegar de nuevo. No subir `.env`, `data/` ni secretos al repositorio. Usar HTTPS en despliegues públicos.
+
+### NVIDIA y APIs adicionales
+
+Para usar el modelo de NVIDIA, agregar en el entorno de la aplicación (local o Railway):
+
+```dotenv
+NVIDIA_API_KEY=tu_clave
+NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+```
+
+Estos valores se detectan como una conexión de IA del espacio. El nombre del modelo debe coincidir con el disponible para tu cuenta. También se puede usar **Añadir API**, elegir **IA · NVIDIA / compatible** e introducir URL base, modelo y clave desde el panel. No hay claves reales en el repositorio.
+
+Para otro proveedor compatible se admiten `LLM_API_KEY`, `LLM_MODEL` y `LLM_BASE_URL`, o una conexión del panel. Se permite un intérprete de IA por espacio y hasta diez conexiones adicionales en total; las APIs de IA se pueden compartir entre espacios, mientras que las keys de Undeadwallet siguen siendo independientes.
+
+Las conexiones de datos usan **GET** y esperan JSON. Admiten acceso público, Bearer token o un encabezado de autenticación configurable. El agente recibe los datos consultados, sin credenciales. Para configurar por entorno, indicar en la conexión el nombre de una variable terminada en `API_KEY`, `API_TOKEN` o `ACCESS_TOKEN`. Se requiere HTTPS en un dominio público; no se siguen redirecciones ni se permiten destinos de red privada. Las respuestas externas se tratan como datos, no como instrucciones del propietario.
+
+El modo Agente valida activos, dirección, apalancamiento 1–100, capital disponible y propiedad de posiciones. No admite transferencias, faucet ni cierre parcial. Las intenciones se guardan antes de enviar órdenes y los estados inciertos requieren conciliación. Un error de IA o de una fuente pausa el espacio, incluidos sus cierres, como los demás errores del motor. El razonamiento de un modelo no garantiza el cumplimiento de una instrucción ambigua.
 
 ## Actualizar la instalación anterior
 
